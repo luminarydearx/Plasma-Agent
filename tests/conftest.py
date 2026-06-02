@@ -3,39 +3,39 @@
 Architecture Note (Phase 1.10 - Database Async Stability Fix):
 ===============================================================
 psycopg3 async backend requires SelectorEventLoop on Windows, but Python 3.13
-on Windows defaults to ProactorEventLoop. pytest-asyncio creates its own event
-loops using the current global policy, so we MUST set the policy BEFORE
-pytest-asyncio is imported and BEFORE any event loop is created.
+on Windows defaults to ProactorEventLoop. pytest-asyncio 1.4.0 uses the
+`pytest_asyncio_loop_factories` hook to determine which event loop factory
+to use when creating event loops for tests and fixtures.
 
-This conftest.py is loaded by pytest before test collection, making it the
-correct place to enforce the policy at the architecture level — not a
-per-test patch.
+Root Cause Analysis:
+-------------------
+1. pytest-asyncio 1.4.0 uses the `pytest_asyncio_loop_factories` hook to
+   create event loops for tests and fixtures.
+2. Setting WindowsSelectorEventLoopPolicy at module import time is NOT enough
+   because pytest-asyncio creates NEW event loops for each test/fixture using
+   the factory returned by the hook.
+3. The `event_loop` fixture (which we previously tried to override) is NOT
+   used by pytest-asyncio 1.4.0 when `asyncio_default_test_loop_scope` is set.
+4. The `event_loop_policy` fixture is deprecated in 1.4.0.
 
-Fix Strategy:
-  1. Set WindowsSelectorEventLoopPolicy globally at import time of conftest.py
-     (before pytest-asyncio loads and creates any event loops).
-  2. Override the event_loop fixture to explicitly create SelectorEventLoop
-     (required for pytest-asyncio to respect our policy).
-  3. The same policy is used by the CLI's run_async() in asyncio_compat.py,
-     ensuring CLI and pytest share identical event loop semantics.
+Fix Strategy (Architecture-Level):
+----------------------------------
+1. Implement `pytest_asyncio_loop_factories` hook to return a factory that
+   creates SelectorEventLoop on Windows.
+2. This makes pytest-asyncio create ALL event loops using this factory.
+3. This ensures every test, fixture, and async operation uses SelectorEventLoop
+   (required by psycopg3 async).
+4. The same policy is used by the CLI's run_async() in asyncio_compat.py,
+   ensuring CLI and pytest share identical event loop semantics.
+
+References:
+- pytest-asyncio docs: https://pytest-asyncio.readthedocs.io/en/v1.4.0/how-to-guides/custom_loop_factory.html
+- psycopg async docs: https://www.psycopg.org/psycopg3/docs/advanced/async.html
 """
 
 import asyncio
 import sys
 import selectors
-
-# ============================================================
-# ARCHITECTURE-LEVEL FIX: Set event loop policy BEFORE any
-# asyncio import happens in test modules. This ensures all
-# event loops created by pytest-asyncio use SelectorEventLoop
-# on Windows (required by psycopg3 async).
-#
-# IMPORTANT: This must be the FIRST thing in this file, before
-# any pytest/pytest-asyncio imports.
-# ============================================================
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
 
 import pytest
 import pytest_asyncio
@@ -45,33 +45,49 @@ from plasmaagent.core.database import Database, get_database
 
 
 # ============================================================
-# CRITICAL FIX: Override event_loop fixture to explicitly create
-# SelectorEventLoop on Windows. pytest-asyncio uses this fixture
-# to get the event loop for async tests.
+# ARCHITECTURE-LEVEL FIX: Custom event loop factory
+# 
+# pytest-asyncio 1.4.0 uses this hook to determine which event
+# loop factory to use when creating event loops for tests and fixtures.
+# On Windows, we MUST return a factory that creates SelectorEventLoop
+# because psycopg3 async is NOT compatible with ProactorEventLoop.
+#
+# This is the CORRECT fix for pytest-asyncio 1.4.0, not overriding
+# the event_loop fixture (which is not used) or event_loop_policy
+# fixture (which is deprecated).
 # ============================================================
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create session-scoped event loop with SelectorEventLoop for Windows.
+def _create_selector_event_loop():
+    """Create a SelectorEventLoop (required by psycopg3 on Windows)."""
+    selector = selectors.SelectSelector()
+    return asyncio.SelectorEventLoop(selector)
+
+
+def pytest_asyncio_loop_factories(config, item):
+    """Return event loop factories for pytest-asyncio.
     
-    This fixture is used by pytest-asyncio to get the event loop for all
-    async tests in the session. On Windows, we explicitly create a
-    SelectorEventLoop (required by psycopg3 async) instead of relying
-    on the default ProactorEventLoop.
+    On Windows, returns a factory that creates SelectorEventLoop because
+    psycopg3 async is not compatible with ProactorEventLoop (the Windows default).
+    
+    On other platforms, returns a factory that creates the default event loop.
+    
+    This hook is called by pytest-asyncio for EVERY event loop it creates
+    (for tests, fixtures, etc.), ensuring consistent SelectorEventLoop usage
+    on Windows throughout the test suite.
+    
+    Args:
+        config: The pytest config object.
+        item: The pytest item (test, fixture, etc.).
+    
+    Returns:
+        A mapping from factory names to factory callables.
     """
     if sys.platform == "win32":
-        # Explicitly create SelectorEventLoop for Windows
-        selector = selectors.SelectSelector()
-        loop = asyncio.SelectorEventLoop(selector)
-        asyncio.set_event_loop(loop)
-    else:
-        # Use default event loop on other platforms
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    yield loop
-    
-    # Cleanup: close the event loop
-    loop.close()
+        return {
+            "psycopg_compatible": _create_selector_event_loop,
+        }
+    return {
+        "default": asyncio.new_event_loop,
+    }
 
 
 @pytest.fixture(scope="session")
