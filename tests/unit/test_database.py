@@ -1,4 +1,15 @@
-"""Unit tests for database module."""
+"""Unit tests for database module.
+
+Architecture Note (Phase 1.10):
+-------------------------------
+These tests exercise the Database class's async interface. On Windows,
+psycopg3 requires SelectorEventLoop; the conftest.py enforces this via
+a global WindowsSelectorEventLoopPolicy set before pytest-asyncio creates
+any event loop.
+
+All query results use dict_row factory, so assertions must check dict keys
+(e.g. result["?column?"]) rather than positional indices.
+"""
 
 import pytest
 
@@ -26,7 +37,12 @@ class TestDatabase:
         assert db._pool is None
 
     async def test_connection_context_manager(self):
-        """Test connection context manager."""
+        """Test connection context manager.
+
+        Verifies that a connection can be obtained from the pool via async
+        context manager and that queries can be executed within it.
+        Uses dict_row factory, so result is a dict with "?column?" key.
+        """
         db = Database()
         await db.connect()
 
@@ -34,14 +50,20 @@ class TestDatabase:
             assert conn is not None
             # Test that we can execute queries
             async with conn.cursor() as cur:
-                await cur.execute("SELECT 1")
+                await cur.execute("SELECT 1 AS val")
                 result = await cur.fetchone()
-                assert result == [1]
+                # dict_row returns dict: {"val": 1}
+                assert result is not None
+                assert result["val"] == 1
 
         await db.disconnect()
 
     async def test_transaction_context_manager(self):
-        """Test transaction context manager."""
+        """Test transaction context manager.
+
+        Verifies that the transaction() context manager provides a connection
+        wrapped in an active transaction that auto-commits on success.
+        """
         db = Database()
         await db.connect()
 
@@ -49,14 +71,22 @@ class TestDatabase:
             assert conn is not None
             # Transaction should be active
             async with conn.cursor() as cur:
-                await cur.execute("SELECT 1")
+                await cur.execute("SELECT 1 AS val")
                 result = await cur.fetchone()
-                assert result == [1]
+                # dict_row returns dict: {"val": 1}
+                assert result is not None
+                assert result["val"] == 1
 
         await db.disconnect()
 
     async def test_health_check_success(self):
-        """Test successful health check."""
+        """Test successful health check.
+
+        The health_check() method executes 'SELECT 1' and verifies the result.
+        With dict_row factory, the column name is "?column?" for literal
+        expressions, but our implementation uses 'SELECT 1' which returns
+        dict {"?column?": 1}.
+        """
         db = Database()
         await db.connect()
         is_healthy = await db.health_check()
