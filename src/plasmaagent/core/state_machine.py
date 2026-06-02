@@ -95,12 +95,14 @@ async def transition_task_state(
                 "SELECT status FROM tasks WHERE id = %s",
                 (task_id,),
             )
-            if await cur.fetchone() is None:
+            locked_result = await cur.fetchone()
+            if locked_result is None:
                 raise TaskNotFoundError(task_id)
             else:
                 raise TaskLockedError(task_id)
 
-        current_status = TaskStatus(result[0])
+        # dict_row returns dict, access by column name
+        current_status = TaskStatus(result["status"])
 
         # Validate transition
         if new_status not in VALID_TASK_TRANSITIONS.get(current_status, set()):
@@ -153,7 +155,8 @@ async def transition_step_state(
         if result is None:
             raise TaskNotFoundError(step_id)
 
-        current_status = StepStatus(result[0])
+        # dict_row returns dict, access by column name
+        current_status = StepStatus(result["status"])
 
         # Validate transition
         if new_status not in VALID_STEP_TRANSITIONS.get(current_status, set()):
@@ -213,7 +216,8 @@ async def recover_crashed_tasks(conn: psycopg.AsyncConnection) -> int:
 
         recovered_count = 0
         for task_row in running_tasks:
-            task_id = task_row[0]
+            # dict_row returns dict, access by column name
+            task_id = task_row["id"]
 
             # Mark as PAUSED
             await cur.execute(

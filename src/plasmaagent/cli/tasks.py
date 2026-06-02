@@ -1,6 +1,5 @@
 """Task management CLI commands."""
 
-import asyncio
 from typing import Optional
 from uuid import UUID
 
@@ -9,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from plasmaagent.cli.theme import console, style_error, style_info, style_success
+from plasmaagent.core.asyncio_compat import run_async
 from plasmaagent.core.database import get_database
 from plasmaagent.core.exceptions import PlasmaAgentError
 from plasmaagent.models.task import TaskCreate
@@ -40,7 +40,7 @@ def create_task(
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
 
-    asyncio.run(_create())
+    run_async(_create())
 
 
 @app.command("list")
@@ -98,7 +98,7 @@ def list_tasks(
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
 
-    asyncio.run(_list())
+    run_async(_list())
 
 
 @app.command("show")
@@ -132,7 +132,7 @@ def show_task(
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
 
-    asyncio.run(_show())
+    run_async(_show())
 
 
 @app.command("run")
@@ -152,7 +152,7 @@ def run_task(
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
 
-    asyncio.run(_run())
+    run_async(_run())
 
 
 @app.command("cancel")
@@ -172,7 +172,7 @@ def cancel_task(
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
 
-    asyncio.run(_cancel())
+    run_async(_cancel())
 
 
 @app.command("retry")
@@ -192,7 +192,7 @@ def retry_task(
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
 
-    asyncio.run(_retry())
+    run_async(_retry())
 
 
 @app.command("delete")
@@ -221,4 +221,4 @@ def delete_task(
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
 
-    asyncio.run(_delete())
+    run_async(_delete())

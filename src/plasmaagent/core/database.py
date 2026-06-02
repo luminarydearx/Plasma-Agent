@@ -35,11 +35,12 @@ class Database:
                 min_size=2,
                 max_size=self._settings.database_pool_size,
                 timeout=self._settings.database_pool_timeout,
+                open=False,  # Don't open automatically
                 kwargs={"row_factory": dict_row, "autocommit": False},
             )
 
-            # Wait for pool to be ready
-            await self._pool.wait()
+            # Open pool explicitly (new psycopg3 pattern)
+            await self._pool.open()
 
         except Exception as e:
             raise ConnectionError(f"Failed to connect to database: {e}") from e
@@ -100,7 +101,7 @@ class Database:
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT 1")
                     result = await cur.fetchone()
-                    return result is not None and result[0] == 1
+                    return result is not None and result["?column?"] == 1
         except Exception as e:
             raise DatabaseError(f"Health check failed: {e}") from e
 
