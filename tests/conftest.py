@@ -14,12 +14,15 @@ per-test patch.
 Fix Strategy:
   1. Set WindowsSelectorEventLoopPolicy globally at import time of conftest.py
      (before pytest-asyncio loads and creates any event loops).
-  2. The same policy is used by the CLI's run_async() in asyncio_compat.py,
+  2. Override the event_loop fixture to explicitly create SelectorEventLoop
+     (required for pytest-asyncio to respect our policy).
+  3. The same policy is used by the CLI's run_async() in asyncio_compat.py,
      ensuring CLI and pytest share identical event loop semantics.
 """
 
 import asyncio
 import sys
+import selectors
 
 # ============================================================
 # ARCHITECTURE-LEVEL FIX: Set event loop policy BEFORE any
@@ -39,6 +42,36 @@ import pytest_asyncio
 
 from plasmaagent.core.config import get_settings
 from plasmaagent.core.database import Database, get_database
+
+
+# ============================================================
+# CRITICAL FIX: Override event_loop fixture to explicitly create
+# SelectorEventLoop on Windows. pytest-asyncio uses this fixture
+# to get the event loop for async tests.
+# ============================================================
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create session-scoped event loop with SelectorEventLoop for Windows.
+    
+    This fixture is used by pytest-asyncio to get the event loop for all
+    async tests in the session. On Windows, we explicitly create a
+    SelectorEventLoop (required by psycopg3 async) instead of relying
+    on the default ProactorEventLoop.
+    """
+    if sys.platform == "win32":
+        # Explicitly create SelectorEventLoop for Windows
+        selector = selectors.SelectSelector()
+        loop = asyncio.SelectorEventLoop(selector)
+        asyncio.set_event_loop(loop)
+    else:
+        # Use default event loop on other platforms
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    yield loop
+    
+    # Cleanup: close the event loop
+    loop.close()
 
 
 @pytest.fixture(scope="session")
