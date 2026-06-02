@@ -1,69 +1,46 @@
-"""Task service for CRUD and lifecycle operations."""
-
-from typing import Optional
+import json
+from typing import Any, Optional
 from uuid import UUID
-
-import psycopg
 
 from plasmaagent.core.database import Database, get_database
 from plasmaagent.core.exceptions import TaskNotFoundError
 from plasmaagent.core.state_machine import TaskStatus, transition_task_state
-from plasmaagent.models.task import Task, TaskCreate
+from plasmaagent.models.task import Task, TaskCreate, TaskPayload
 
 
 class TaskService:
-    """Service for task operations."""
-
-    def __init__(self, database: Optional[Database] = None):
-        """Initialize task service.
-
-        Args:
-            database: Optional database instance
-        """
+    def __init__(self, database: Optional[Database] = None) -> None:
         self._db = database or get_database()
 
     async def create_task(self, task_data: TaskCreate) -> Task:
-        """Create a new task.
+        payload_json: Optional[str] = None
+        if task_data.payload is not None:
+            payload_json = json.dumps(task_data.payload.model_dump())
 
-        Args:
-            task_data: Task creation data
-
-        Returns:
-            Task: Created task
-        """
         async with self._db.transaction() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    """
-                    INSERT INTO tasks (name, description, status)
-                    VALUES (%s, %s, %s)
-                    RETURNING id, name, description, status, created_at, updated_at
-                    """,
-                    (task_data.name, task_data.description, TaskStatus.PENDING.value),
+                    """INSERT INTO tasks (name, description, status, payload)
+                       VALUES (%s, %s, %s, %s::jsonb)
+                       RETURNING id, name, description, status, payload,
+                                 created_at, updated_at""",
+                    (
+                        task_data.name,
+                        task_data.description,
+                        TaskStatus.PENDING.value,
+                        payload_json,
+                    ),
                 )
                 result = await cur.fetchone()
                 return Task(**result)
 
     async def get_task(self, task_id: UUID) -> Task:
-        """Get a task by ID.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            Task: Retrieved task
-
-        Raises:
-            TaskNotFoundError: If task doesn't exist
-        """
         async with self._db.connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    """
-                    SELECT id, name, description, status, created_at, updated_at
-                    FROM tasks
-                    WHERE id = %s
-                    """,
+                    """SELECT id, name, description, status, payload,
+                              created_at, updated_at
+                       FROM tasks WHERE id = %s""",
                     (task_id,),
                 )
                 result = await cur.fetchone()
@@ -77,130 +54,91 @@ class TaskService:
         limit: int = 100,
         offset: int = 0,
     ) -> list[Task]:
-        """List tasks with optional filtering.
-
-        Args:
-            status: Optional status filter
-            limit: Maximum number of tasks to return
-            offset: Number of tasks to skip
-
-        Returns:
-            list[Task]: List of tasks
-        """
         async with self._db.connection() as conn:
             async with conn.cursor() as cur:
                 if status:
                     await cur.execute(
-                        """
-                        SELECT id, name, description, status, created_at, updated_at
-                        FROM tasks
-                        WHERE status = %s
-                        ORDER BY created_at DESC
-                        LIMIT %s OFFSET %s
-                        """,
+                        """SELECT id, name, description, status, payload,
+                                  created_at, updated_at
+                           FROM tasks WHERE status = %s
+                           ORDER BY created_at DESC
+                           LIMIT %s OFFSET %s""",
                         (status.value, limit, offset),
                     )
                 else:
                     await cur.execute(
-                        """
-                        SELECT id, name, description, status, created_at, updated_at
-                        FROM tasks
-                        ORDER BY created_at DESC
-                        LIMIT %s OFFSET %s
-                        """,
+                        """SELECT id, name, description, status, payload,
+                                  created_at, updated_at
+                           FROM tasks
+                           ORDER BY created_at DESC
+                           LIMIT %s OFFSET %s""",
                         (limit, offset),
                     )
                 results = await cur.fetchall()
                 return [Task(**row) for row in results]
 
     async def run_task(self, task_id: UUID) -> Task:
-        """Transition a task to RUNNING state.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            Task: Updated task
-        """
         async with self._db.transaction() as conn:
             await transition_task_state(conn, str(task_id), TaskStatus.RUNNING)
         return await self.get_task(task_id)
 
     async def pause_task(self, task_id: UUID) -> Task:
-        """Transition a task to PAUSED state.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            Task: Updated task
-        """
         async with self._db.transaction() as conn:
             await transition_task_state(conn, str(task_id), TaskStatus.PAUSED)
         return await self.get_task(task_id)
 
     async def complete_task(self, task_id: UUID) -> Task:
-        """Transition a task to COMPLETED state.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            Task: Updated task
-        """
         async with self._db.transaction() as conn:
             await transition_task_state(conn, str(task_id), TaskStatus.COMPLETED)
         return await self.get_task(task_id)
 
     async def fail_task(self, task_id: UUID) -> Task:
-        """Transition a task to FAILED state.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            Task: Updated task
-        """
         async with self._db.transaction() as conn:
             await transition_task_state(conn, str(task_id), TaskStatus.FAILED)
         return await self.get_task(task_id)
 
     async def cancel_task(self, task_id: UUID) -> Task:
-        """Transition a task to CANCELLED state.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            Task: Updated task
-        """
         async with self._db.transaction() as conn:
             await transition_task_state(conn, str(task_id), TaskStatus.CANCELLED)
         return await self.get_task(task_id)
 
     async def retry_task(self, task_id: UUID) -> Task:
-        """Retry a failed task by resetting to PENDING.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            Task: Updated task
-        """
         async with self._db.transaction() as conn:
             await transition_task_state(conn, str(task_id), TaskStatus.PENDING)
         return await self.get_task(task_id)
 
     async def delete_task(self, task_id: UUID) -> bool:
-        """Delete a task.
-
-        Args:
-            task_id: Task UUID
-
-        Returns:
-            bool: True if deleted
-        """
         async with self._db.transaction() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("DELETE FROM tasks WHERE id = %s", (task_id,))
                 return cur.rowcount > 0
+
+    async def get_task_steps(self, task_id: UUID) -> list[dict[str, Any]]:
+        async with self._db.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT id, step_order, command, status, output, stderr,
+                              exit_code, duration_ms, started_at, finished_at
+                       FROM task_steps
+                       WHERE task_id = %s
+                       ORDER BY step_order ASC""",
+                    (task_id,),
+                )
+                return await cur.fetchall()
+
+    async def get_execution_logs(
+        self,
+        task_id: UUID,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        async with self._db.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT id, step_id, log_level, message, timestamp
+                       FROM execution_logs
+                       WHERE task_id = %s
+                       ORDER BY timestamp ASC
+                       LIMIT %s""",
+                    (task_id, limit),
+                )
+                return await cur.fetchall()

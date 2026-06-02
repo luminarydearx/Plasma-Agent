@@ -1,5 +1,3 @@
-"""Main CLI entry point using Typer."""
-
 from typing import Optional
 
 import typer
@@ -15,13 +13,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-
 def version_callback(value: bool) -> None:
-    """Show version and exit.
-
-    Args:
-        value: Whether to show version
-    """
     if value:
         console.print(f"[#00D4FF]PlasmaAgent v{__version__}[/#00D4FF]")
         raise typer.Exit()
@@ -38,90 +30,88 @@ def main(
         is_eager=True,
     ),
 ) -> None:
-    """PlasmaAgent - Database-Centric Agentic Execution Framework."""
     pass
 
 
 @app.command()
 def doctor() -> None:
-    """Check system health and dependencies."""
     console.print(get_logo())
     console.print("\n[bold #00D4FF]System Health Check[/bold #00D4FF]\n")
 
-    # Check Python version
     import sys
 
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     console.print(f"[#00D4FF]✓[/#00D4FF] Python: {python_version}")
 
-    # Check database connection
-    async def check_db() -> bool:
+    async def check_all() -> tuple[bool, bool]:
+        from plasmaagent.core.database import get_database
+
+        db = get_database()
         try:
-            from plasmaagent.core.database import get_database
-
-            db = get_database()
             await db.connect()
-            is_healthy = await db.health_check()
-            await db.disconnect()
-            return is_healthy
-        except Exception as e:
-            console.print(f"[bold #FF00D4]✗[/bold #FF00D4] Database: {e}")
-            return False
+            is_healthy = False
+            schema_ok = False
 
-    db_healthy = run_async(check_db())
+            async with db.connection() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SELECT 1 AS ping")
+                    health_result = await cur.fetchone()
+                    if health_result is not None and health_result.get("ping") == 1:
+                        is_healthy = True
+
+                    await cur.execute(
+                        """SELECT COUNT(*) AS table_count
+                           FROM information_schema.tables
+                           WHERE table_schema = 'public'
+                             AND table_name IN ('tasks', 'task_steps', 'execution_logs', 'telemetry')"""
+                    )
+                    schema_result = await cur.fetchone()
+                    if (
+                        schema_result is not None
+                        and schema_result.get("table_count", 0) >= 4
+                    ):
+                        schema_ok = True
+
+            await db.disconnect()
+            return is_healthy, schema_ok
+        except Exception:
+            if db._pool is not None:
+                try:
+                    await db.disconnect()
+                except Exception:
+                    pass
+            return False, False
+
+    db_healthy, schema_ok = run_async(check_all())
+
     if db_healthy:
         console.print("[#00D4FF]✓[/#00D4FF] Database: Connected")
     else:
         console.print("[bold #FF00D4]✗[/bold #FF00D4] Database: Connection failed")
 
-    # Check schema
-    async def check_schema() -> bool:
-        try:
-            from plasmaagent.core.database import get_database
-
-            db = get_database()
-            await db.connect()
-            async with db.connection() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute(
-                        """
-                        SELECT EXISTS (
-                            SELECT FROM information_schema.tables
-                            WHERE table_name = 'tasks'
-                        )
-                        """
-                    )
-                    result = await cur.fetchone()
-            await db.disconnect()
-            return result["exists"] if result else False
-        except Exception:
-            return False
-
-    schema_ok = run_async(check_schema())
     if schema_ok:
         console.print("[#00D4FF]✓[/#00D4FF] Schema: Initialized")
     else:
-        console.print("[bold #FF00D4]✗[/bold #FF00D4] Schema: Not initialized (run 'make db-init')")
+        console.print(
+            "[bold #FF00D4]✗[/bold #FF00D4] Schema: Not initialized "
+            "(run 'uv run alembic upgrade head')"
+        )
 
     console.print()
 
 
 @app.command()
 def hello() -> None:
-    """Say hello (test command)."""
     console.print(style_success("Hello from PlasmaAgent!"))
     console.print(style_info("This is a test command."))
 
 
-# Import and register task commands (lazy import to avoid circular dependency)
 def register_commands() -> None:
-    """Register subcommands."""
     from plasmaagent.cli import tasks
 
     app.add_typer(tasks.app, name="task", help="Task management commands")
 
 
-# Register commands on module load
 register_commands()
 
 

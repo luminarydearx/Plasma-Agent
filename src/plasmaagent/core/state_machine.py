@@ -1,5 +1,3 @@
-"""PostgreSQL Transactional State Machine (PTSM) implementation."""
-
 from enum import Enum
 from typing import Optional
 
@@ -13,8 +11,6 @@ from plasmaagent.core.exceptions import (
 
 
 class TaskStatus(str, Enum):
-    """Task status enum."""
-
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     PAUSED = "PAUSED"
@@ -24,8 +20,6 @@ class TaskStatus(str, Enum):
 
 
 class StepStatus(str, Enum):
-    """Step status enum."""
-
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
@@ -33,7 +27,6 @@ class StepStatus(str, Enum):
     SKIPPED = "SKIPPED"
 
 
-# Define valid state transitions
 VALID_TASK_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
     TaskStatus.PENDING: {TaskStatus.RUNNING, TaskStatus.CANCELLED},
     TaskStatus.RUNNING: {
@@ -43,17 +36,17 @@ VALID_TASK_TRANSITIONS: dict[TaskStatus, set[TaskStatus]] = {
         TaskStatus.CANCELLED,
     },
     TaskStatus.PAUSED: {TaskStatus.RUNNING, TaskStatus.CANCELLED},
-    TaskStatus.FAILED: {TaskStatus.PENDING},  # Allow retry
-    TaskStatus.COMPLETED: set(),  # Terminal state
-    TaskStatus.CANCELLED: set(),  # Terminal state
+    TaskStatus.FAILED: {TaskStatus.PENDING},
+    TaskStatus.COMPLETED: set(),
+    TaskStatus.CANCELLED: set(),
 }
 
 VALID_STEP_TRANSITIONS: dict[StepStatus, set[StepStatus]] = {
     StepStatus.PENDING: {StepStatus.RUNNING, StepStatus.SKIPPED},
     StepStatus.RUNNING: {StepStatus.COMPLETED, StepStatus.FAILED},
-    StepStatus.COMPLETED: set(),  # Terminal state
-    StepStatus.FAILED: {StepStatus.PENDING},  # Allow retry
-    StepStatus.SKIPPED: set(),  # Terminal state
+    StepStatus.COMPLETED: set(),
+    StepStatus.FAILED: {StepStatus.PENDING},
+    StepStatus.SKIPPED: set(),
 }
 
 
@@ -62,35 +55,14 @@ async def transition_task_state(
     task_id: str,
     new_status: TaskStatus,
 ) -> bool:
-    """Transition a task to a new state with atomic locking.
-
-    Args:
-        conn: Database connection
-        task_id: Task UUID
-        new_status: Target status
-
-    Returns:
-        bool: True if transition succeeded
-
-    Raises:
-        TaskNotFoundError: If task doesn't exist
-        TaskLockedError: If task is locked by another process
-        InvalidStateTransitionError: If transition is invalid
-    """
     async with conn.cursor() as cur:
-        # Lock the task row with FOR UPDATE SKIP LOCKED
         await cur.execute(
-            """
-            SELECT status FROM tasks
-            WHERE id = %s
-            FOR UPDATE SKIP LOCKED
-            """,
+            "SELECT status FROM tasks WHERE id = %s FOR UPDATE SKIP LOCKED",
             (task_id,),
         )
         result = await cur.fetchone()
 
         if result is None:
-            # Check if task exists but is locked
             await cur.execute(
                 "SELECT status FROM tasks WHERE id = %s",
                 (task_id,),
@@ -101,25 +73,17 @@ async def transition_task_state(
             else:
                 raise TaskLockedError(task_id)
 
-        # dict_row returns dict, access by column name
         current_status = TaskStatus(result["status"])
 
-        # Validate transition
         if new_status not in VALID_TASK_TRANSITIONS.get(current_status, set()):
             raise InvalidStateTransitionError(
                 current_status.value, new_status.value, task_id
             )
 
-        # Perform transition
         await cur.execute(
-            """
-            UPDATE tasks
-            SET status = %s, updated_at = NOW()
-            WHERE id = %s
-            """,
+            "UPDATE tasks SET status = %s, updated_at = NOW() WHERE id = %s",
             (new_status.value, task_id),
         )
-
         return True
 
 
@@ -129,42 +93,22 @@ async def transition_step_state(
     new_status: StepStatus,
     output: Optional[str] = None,
 ) -> bool:
-    """Transition a step to a new state.
-
-    Args:
-        conn: Database connection
-        step_id: Step UUID
-        new_status: Target status
-        output: Optional output to store
-
-    Returns:
-        bool: True if transition succeeded
-
-    Raises:
-        TaskNotFoundError: If step doesn't exist
-        InvalidStateTransitionError: If transition is invalid
-    """
     async with conn.cursor() as cur:
-        # Get current status
         await cur.execute(
             "SELECT status FROM task_steps WHERE id = %s FOR UPDATE",
             (step_id,),
         )
         result = await cur.fetchone()
-
         if result is None:
             raise TaskNotFoundError(step_id)
 
-        # dict_row returns dict, access by column name
         current_status = StepStatus(result["status"])
 
-        # Validate transition
         if new_status not in VALID_STEP_TRANSITIONS.get(current_status, set()):
             raise InvalidStateTransitionError(
                 current_status.value, new_status.value, step_id
             )
 
-        # Build update query
         update_fields = ["status = %s"]
         params: list = [new_status.value]
 
@@ -180,92 +124,42 @@ async def transition_step_state(
         params.append(step_id)
 
         await cur.execute(
-            f"""
-            UPDATE task_steps
-            SET {', '.join(update_fields)}
-            WHERE id = %s
-            """,
+            f"UPDATE task_steps SET {', '.join(update_fields)} WHERE id = %s",
             params,
         )
-
         return True
 
 
 async def recover_crashed_tasks(conn: psycopg.AsyncConnection) -> int:
-    """Recover tasks that were running when the system crashed.
-
-    Marks RUNNING tasks as PAUSED so they can be manually resumed or retried.
-
-    Args:
-        conn: Database connection
-
-    Returns:
-        int: Number of tasks recovered
-    """
     async with conn.cursor() as cur:
-        # Find all RUNNING tasks
         await cur.execute(
-            """
-            SELECT id FROM tasks
-            WHERE status = %s
-            FOR UPDATE SKIP LOCKED
-            """,
+            "SELECT id FROM tasks WHERE status = %s FOR UPDATE SKIP LOCKED",
             (TaskStatus.RUNNING.value,),
         )
         running_tasks = await cur.fetchall()
-
         recovered_count = 0
-        for task_row in running_tasks:
-            # dict_row returns dict, access by column name
-            task_id = task_row["id"]
 
-            # Mark as PAUSED
+        for task_row in running_tasks:
+            task_id = task_row["id"]
             await cur.execute(
-                """
-                UPDATE tasks
-                SET status = %s, updated_at = NOW()
-                WHERE id = %s
-                """,
+                "UPDATE tasks SET status = %s, updated_at = NOW() WHERE id = %s",
                 (TaskStatus.PAUSED.value, task_id),
             )
-
-            # Mark any RUNNING steps as FAILED
             await cur.execute(
-                """
-                UPDATE task_steps
-                SET status = %s, finished_at = NOW(),
-                    output = COALESCE(output, '') || E'\n[CRASH RECOVERY] Task interrupted'
-                WHERE task_id = %s AND status = %s
-                """,
+                """UPDATE task_steps
+                   SET status = %s, finished_at = NOW(),
+                       output = COALESCE(output, '') || E'\n[CRASH RECOVERY] Task interrupted'
+                   WHERE task_id = %s AND status = %s""",
                 (StepStatus.FAILED.value, task_id, StepStatus.RUNNING.value),
             )
-
             recovered_count += 1
 
         return recovered_count
 
 
 def is_valid_task_transition(current: TaskStatus, target: TaskStatus) -> bool:
-    """Check if a task state transition is valid.
-
-    Args:
-        current: Current status
-        target: Target status
-
-    Returns:
-        bool: True if transition is valid
-    """
     return target in VALID_TASK_TRANSITIONS.get(current, set())
 
 
 def is_valid_step_transition(current: StepStatus, target: StepStatus) -> bool:
-    """Check if a step state transition is valid.
-
-    Args:
-        current: Current status
-        target: Target status
-
-    Returns:
-        bool: True if transition is valid
-    """
     return target in VALID_STEP_TRANSITIONS.get(current, set())

@@ -1,34 +1,28 @@
-"""Data models for task steps."""
-
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TaskStepBase(BaseModel):
-    """Base step model."""
-
-    step_order: int = Field(..., ge=1, description="Execution order")
-    command: str = Field(..., description="Shell command to execute")
+    step_order: int = Field(..., ge=1)
+    command: str
 
 
 class TaskStepCreate(TaskStepBase):
-    """Model for creating a step."""
-
     task_id: UUID
 
 
 class TaskStep(TaskStepBase):
-    """Complete step model."""
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     task_id: UUID
     status: str
     output: Optional[str] = None
+    stderr: Optional[str] = None
+    exit_code: Optional[int] = None
+    duration_ms: Optional[int] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

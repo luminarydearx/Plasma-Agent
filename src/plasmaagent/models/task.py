@@ -1,46 +1,42 @@
-"""Data models for tasks."""
-
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class TaskPayload(BaseModel):
+    commands: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = None
+    timeout: int = 300
 
 
 class TaskBase(BaseModel):
-    """Base task model."""
-
-    name: str = Field(..., max_length=255, description="Task name")
-    description: Optional[str] = Field(None, description="Task description")
+    name: str = Field(..., max_length=255)
+    description: Optional[str] = None
 
 
 class TaskCreate(TaskBase):
-    """Model for creating a task."""
-
-    pass
+    payload: Optional[TaskPayload] = None
 
 
 class TaskUpdate(BaseModel):
-    """Model for updating a task."""
-
     name: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
     status: Optional[str] = None
+    payload: Optional[dict[str, Any]] = None
 
 
 class Task(TaskBase):
-    """Complete task model."""
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     status: str
+    payload: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class TaskWithSteps(Task):
-    """Task model with associated steps."""
-
     steps: list = Field(default_factory=list)

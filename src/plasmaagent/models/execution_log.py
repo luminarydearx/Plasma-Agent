@@ -1,33 +1,24 @@
-"""Data models for execution logs."""
-
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExecutionLogBase(BaseModel):
-    """Base log model."""
-
-    log_level: str = Field(..., max_length=20, description="Log level")
-    message: str = Field(..., description="Log message")
+    log_level: str = Field(..., max_length=20)
+    message: str
 
 
 class ExecutionLogCreate(ExecutionLogBase):
-    """Model for creating a log entry."""
-
     task_id: UUID
     step_id: Optional[UUID] = None
 
 
 class ExecutionLog(ExecutionLogBase):
-    """Complete log model."""
+    model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     task_id: UUID
     step_id: Optional[UUID] = None
     timestamp: datetime
-
-    class Config:
-        from_attributes = True
