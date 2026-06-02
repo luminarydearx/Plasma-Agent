@@ -1,6 +1,5 @@
 """Main CLI entry point using Typer."""
 
-import asyncio
 from typing import Optional
 
 import typer
@@ -8,6 +7,7 @@ import typer
 from plasmaagent import __version__
 from plasmaagent.cli.logo import get_logo
 from plasmaagent.cli.theme import console, style_info, style_success
+from plasmaagent.core.asyncio_compat import run_async
 
 app = typer.Typer(
     name="plasma",
@@ -23,7 +23,7 @@ def version_callback(value: bool) -> None:
         value: Whether to show version
     """
     if value:
-        console.print(f"[cyan]PlasmaAgent v{__version__}[/cyan]")
+        console.print(f"[#00D4FF]PlasmaAgent v{__version__}[/#00D4FF]")
         raise typer.Exit()
 
 
@@ -46,13 +46,13 @@ def main(
 def doctor() -> None:
     """Check system health and dependencies."""
     console.print(get_logo())
-    console.print("\n[bold cyan]System Health Check[/bold cyan]\n")
+    console.print("\n[bold #00D4FF]System Health Check[/bold #00D4FF]\n")
 
     # Check Python version
     import sys
 
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    console.print(f"[cyan]✓[/cyan] Python: {python_version}")
+    console.print(f"[#00D4FF]✓[/#00D4FF] Python: {python_version}")
 
     # Check database connection
     async def check_db() -> bool:
@@ -65,14 +65,14 @@ def doctor() -> None:
             await db.disconnect()
             return is_healthy
         except Exception as e:
-            console.print(f"[magenta]✗[/magenta] Database: {e}")
+            console.print(f"[bold #FF00D4]✗[/bold #FF00D4] Database: {e}")
             return False
 
-    db_healthy = asyncio.run(check_db())
+    db_healthy = run_async(check_db())
     if db_healthy:
-        console.print("[cyan]✓[/cyan] Database: Connected")
+        console.print("[#00D4FF]✓[/#00D4FF] Database: Connected")
     else:
-        console.print("[magenta]✗[/magenta] Database: Connection failed")
+        console.print("[bold #FF00D4]✗[/bold #FF00D4] Database: Connection failed")
 
     # Check schema
     async def check_schema() -> bool:
@@ -93,15 +93,15 @@ def doctor() -> None:
                     )
                     result = await cur.fetchone()
             await db.disconnect()
-            return result[0] if result else False
+            return result["exists"] if result else False
         except Exception:
             return False
 
-    schema_ok = asyncio.run(check_schema())
+    schema_ok = run_async(check_schema())
     if schema_ok:
-        console.print("[cyan]✓[/cyan] Schema: Initialized")
+        console.print("[#00D4FF]✓[/#00D4FF] Schema: Initialized")
     else:
-        console.print("[magenta]✗[/magenta] Schema: Not initialized (run 'make db-init')")
+        console.print("[bold #FF00D4]✗[/bold #FF00D4] Schema: Not initialized (run 'make db-init')")
 
     console.print()
 

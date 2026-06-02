@@ -1,37 +1,38 @@
-"""ASCII logo for PlasmaAgent."""
+"""ASCII logo for PlasmaAgent with plasma colors."""
 
-PLASMA_LOGO = r"""
+# Plasma-themed ASCII logo with hex color markup
+PLASMA_LOGO = r"""[#00D4FF]
   ██████╗ ██╗      █████╗ ███████╗███╗   ███╗ █████╗ 
   ██╔══██╗██║     ██╔══██╗██╔════╝████╗ ████║██╔══██╗
   ██████╔╝██║     ███████║███████╗██╔████╔██║███████║
   ██╔═══╝ ██║     ██╔══██║╚════██║██║╚██╔╝██║██╔══██║
   ██║     ███████╗██║  ██║███████║██║ ╚═╝ ██║██║  ██║
-  ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝
+  ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝[/#00D4FF]
   
-         ╭─────╮  AGENT  ╭─────╮
-         │ ◉◉◉ │  v0.1.0 │ ◉◉◉ │
-         ╰─────╯         ╰─────╯
+         [#FF00D4]╭─────╮[/#FF00D4]  [#FFD700]AGENT[/#FFD700]  [#FF00D4]╭─────╮[/#FF00D4]
+         [#FF00D4]│[/#FF00D4] [#FF1493]◉◉◉[/#FF1493] [#FF00D4]│[/#FF00D4]  [#00FF7F]v0.1.0[/#00FF7F] [#FF00D4]│[/#FF00D4] [#FF1493]◉◉◉[/#FF1493] [#FF00D4]│[/#FF00D4]
+         [#FF00D4]╰─────╯[/#FF00D4]         [#FF00D4]╰─────╯[/#FF00D4]
 """
 
-PLASMA_SPHERE = r"""
+PLASMA_SPHERE = r"""[#8B00FF]
         ╭─────────╮
-       ╱  ◉     ◉  ╲
-      │    ╲   ╱    │
-      │     ◉      │
-      │    ╱   ╲    │
-       ╲  ◉     ◉  ╱
-        ╰─────────╯
+       ╱[/#8B00FF] [#00D4FF]◉[/#00D4FF]     [#00D4FF]◉[/#00D4FF] [#8B00FF]╲
+      │[/#8B00FF]    [#FF00D4]╲[/#FF00D4]   [#FF00D4]╱[/#FF00D4]    [#8B00FF]│
+      │[/#8B00FF]     [#FFD700]◉[/#FFD700]      [#8B00FF]│
+      │[/#8B00FF]    [#FF00D4]╱[/#FF00D4]   [#FF00D4]╲[/#FF00D4]    [#8B00FF]│
+       ╲[/#8B00FF] [#00D4FF]◉[/#00D4FF]     [#00D4FF]◉[/#00D4FF] [#8B00FF]╱
+        ╰─────────╯[/#8B00FF]
 """
 
 
 def get_logo(with_sphere: bool = False) -> str:
-    """Get the PlasmaAgent logo.
+    """Get the PlasmaAgent logo with plasma colors.
 
     Args:
         with_sphere: Include plasma sphere
 
     Returns:
-        str: ASCII logo
+        str: Colored ASCII logo
     """
     if with_sphere:
         return PLASMA_SPHERE + "\n" + PLASMA_LOGO

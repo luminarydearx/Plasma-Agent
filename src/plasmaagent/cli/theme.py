@@ -1,36 +1,50 @@
-"""CLI theme and color configuration."""
+"""CLI theme and color configuration for PlasmaAgent."""
 
 from rich.console import Console
+from rich.panel import Panel
+from rich.style import Style
 from rich.theme import Theme
 
-# PlasmaAgent color palette
+# PlasmaAgent color palette - inspired by cosmic plasma phenomena
+# Using Rich-compatible color names and hex values
 PLASMA_COLORS = {
-    "cyan": "#00FFFF",  # Electric Cyan - primary actions
-    "magenta": "#FF00FF",  # Plasma Magenta - errors/warnings
-    "violet": "#8B00FF",  # Deep Violet - information
-    "white": "#FFFFFF",  # Plasma Core - highlights
-    "dark": "#1A1A2E",  # Dark Matter - backgrounds
+    # Core plasma colors
+    "plasma_cyan": "#00D4FF",      # Ionized gas glow - primary actions
+    "plasma_magenta": "#FF00D4",   # High-energy plasma - errors/warnings
+    "plasma_violet": "#8B00FF",    # Deep space plasma - information
+    
+    # Solar/stellar colors
+    "solar_gold": "#FFD700",       # Solar flares and corona
+    "solar_orange": "#FF6B35",     # Solar prominences
+    
+    # Nebula colors
+    "nebula_pink": "#FF1493",      # Emission nebula
+    
+    # Aurora colors
+    "aurora_green": "#00FF7F",     # Aurora borealis
 }
 
-# Create custom theme
+# Create custom theme with Rich-compatible styles
+# Theme values must be Style objects or valid color strings
 plasma_theme = Theme(
     {
-        "info": "cyan",
-        "warning": "yellow",
-        "danger": "bold magenta",
-        "error": "bold magenta",
-        "success": "bold cyan",
-        "highlight": "bold white",
-        "dim": "dim white",
+        # Semantic styles using standard Rich colors
+        "info": Style(color="cyan"),
+        "warning": Style(color="yellow"),
+        "danger": Style(color="magenta", bold=True),
+        "error": Style(color="magenta", bold=True),
+        "success": Style(color="green", bold=True),
+        "highlight": Style(bold=True),
+        "dim": Style(dim=True),
     }
 )
 
-# Global console instance
-console = Console(theme=plasma_theme)
+# Global console instance with truecolor support
+console = Console(theme=plasma_theme, color_system="truecolor")
 
 
 def style_success(message: str) -> str:
-    """Style a success message.
+    """Style a success message with aurora green.
 
     Args:
         message: Message to style
@@ -38,11 +52,11 @@ def style_success(message: str) -> str:
     Returns:
         str: Styled message
     """
-    return f"[cyan]{message}[/cyan]"
+    return f"[#{PLASMA_COLORS['aurora_green'].lstrip('#')}]{message}[/{PLASMA_COLORS['aurora_green'].lstrip('#')}]"
 
 
 def style_error(message: str) -> str:
-    """Style an error message.
+    """Style an error message with plasma magenta.
 
     Args:
         message: Message to style
@@ -50,11 +64,12 @@ def style_error(message: str) -> str:
     Returns:
         str: Styled message
     """
-    return f"[bold magenta]{message}[/bold magenta]"
+    color = PLASMA_COLORS['plasma_magenta'].lstrip('#')
+    return f"[bold #{color}]{message}[/bold #{color}]"
 
 
 def style_warning(message: str) -> str:
-    """Style a warning message.
+    """Style a warning message with solar gold.
 
     Args:
         message: Message to style
@@ -62,11 +77,12 @@ def style_warning(message: str) -> str:
     Returns:
         str: Styled message
     """
-    return f"[yellow]{message}[/yellow]"
+    color = PLASMA_COLORS['solar_gold'].lstrip('#')
+    return f"[#{color}]{message}[/{color}]"
 
 
 def style_info(message: str) -> str:
-    """Style an info message.
+    """Style an info message with plasma cyan.
 
     Args:
         message: Message to style
@@ -74,4 +90,43 @@ def style_info(message: str) -> str:
     Returns:
         str: Styled message
     """
-    return f"[violet]{message}[/violet]"
+    color = PLASMA_COLORS['plasma_cyan'].lstrip('#')
+    return f"[#{color}]{message}[/{color}]"
+
+
+def pc(color_name: str) -> str:
+    """Get hex color code for plasma color name.
+
+    Args:
+        color_name: Plasma color name (e.g., 'plasma_cyan', 'solar_gold')
+
+    Returns:
+        str: Hex color code (e.g., '#00D4FF')
+    """
+    return PLASMA_COLORS.get(color_name, "#FFFFFF")
+
+
+def create_panel(
+    content: str,
+    title: str = "",
+    border_style: str = "plasma_cyan",
+    padding: tuple = (1, 2),
+) -> Panel:
+    """Create a styled panel with plasma colors.
+
+    Args:
+        content: Panel content
+        title: Panel title
+        border_style: Border color name (plasma_cyan, plasma_magenta, solar_gold, etc.)
+        padding: Padding as (vertical, horizontal)
+
+    Returns:
+        Panel: Styled Rich Panel
+    """
+    color = pc(border_style)
+    return Panel(
+        content,
+        title=title,
+        border_style=color,
+        padding=padding,
+    )

@@ -4,7 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 import typer
-from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from plasmaagent.cli.theme import console, style_error, style_info, style_success
@@ -33,9 +33,22 @@ def create_task(
             task_data = TaskCreate(name=name, description=description)
             task = await service.create_task(task_data)
             await db.disconnect()
-            console.print(style_success(f"Task created: {task.id}"))
-            console.print(f"  Name: {task.name}")
-            console.print(f"  Status: {task.status}")
+            
+            # Create panel with task info
+            content = f"[#00D4FF]ID:[/#00D4FF]     {task.id}\n"
+            content += f"[#00D4FF]Name:[/#00D4FF]   {task.name}\n"
+            content += f"[#00D4FF]Status:[/#00D4FF] [#00FF7F]{task.status}[/#00FF7F]\n"
+            if task.description:
+                content += f"[#00D4FF]Desc:[/#00D4FF]   {task.description}"
+            
+            panel = Panel(
+                content,
+                title=f"[bold #FFD700]Task Created[/bold #FFD700]",
+                border_style="#00D4FF",
+                padding=(1, 2),
+            )
+            console.print(panel)
+            
         except PlasmaAgentError as e:
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
@@ -79,17 +92,27 @@ def list_tasks(
                 console.print(style_info("No tasks found"))
                 return
 
-            table = Table(title="Tasks")
-            table.add_column("ID", style="cyan")
-            table.add_column("Name", style="white")
-            table.add_column("Status", style="violet")
+            table = Table(title="[bold #FFD700]Tasks[/bold #FFD700]", border_style="#00D4FF")
+            table.add_column("ID", style="#00D4FF")
+            table.add_column("Name", style="#F0F8FF")
+            table.add_column("Status", style="#8B00FF")
             table.add_column("Created", style="dim")
 
             for task in tasks:
+                # Color-code status
+                status_color = {
+                    "PENDING": "#FFD700",
+                    "RUNNING": "#00D4FF",
+                    "COMPLETED": "#00FF7F",
+                    "FAILED": "#FF00D4",
+                    "CANCELLED": "#FF1493",
+                    "PAUSED": "#8B00FF",
+                }.get(task.status, "#FFFFFF")
+                
                 table.add_row(
                     str(task.id),
                     task.name,
-                    task.status,
+                    f"[{status_color}]{task.status}[/{status_color}]",
                     task.created_at.strftime("%Y-%m-%d %H:%M"),
                 )
 
@@ -114,20 +137,35 @@ def show_task(
             task = await service.get_task(UUID(task_id))
             await db.disconnect()
 
-            console.print(f"\n[bold cyan]Task Details[/bold cyan]\n")
-            console.print(f"ID:          [white]{task.id}[/white]")
-            console.print(f"Name:        [white]{task.name}[/white]")
-            console.print(
-                f"Description: [white]{task.description or 'N/A'}[/white]"
-            )
-            console.print(f"Status:      [violet]{task.status}[/violet]")
-            console.print(
-                f"Created:     [dim]{task.created_at.strftime('%Y-%m-%d %H:%M:%S')}[/dim]"
-            )
-            console.print(
-                f"Updated:     [dim]{task.updated_at.strftime('%Y-%m-%d %H:%M:%S')}[/dim]"
+            # Color-code status
+            status_color = {
+                "PENDING": "#FFD700",
+                "RUNNING": "#00D4FF",
+                "COMPLETED": "#00FF7F",
+                "FAILED": "#FF00D4",
+                "CANCELLED": "#FF1493",
+                "PAUSED": "#8B00FF",
+            }.get(task.status, "#FFFFFF")
+            
+            # Create content
+            content = f"[#00D4FF]ID:[/#00D4FF]          {task.id}\n"
+            content += f"[#00D4FF]Name:[/#00D4FF]        {task.name}\n"
+            content += f"[#00D4FF]Description:[/#00D4FF] {task.description or 'N/A'}\n"
+            content += f"[#00D4FF]Status:[/#00D4FF]      [{status_color}]{task.status}[/{status_color}]\n"
+            content += f"[#00D4FF]Created:[/#00D4FF]     {task.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            content += f"[#00D4FF]Updated:[/#00D4FF]     {task.updated_at.strftime('%Y-%m-%d %H:%M:%S')}"
+
+            # Create panel
+            panel = Panel(
+                content,
+                title=f"[bold #FFD700]Task Details[/bold #FFD700]",
+                border_style="#00D4FF",
+                padding=(1, 2),
             )
             console.print()
+            console.print(panel)
+            console.print()
+            
         except PlasmaAgentError as e:
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
@@ -147,7 +185,18 @@ def run_task(
             service = TaskService(db)
             task = await service.run_task(UUID(task_id))
             await db.disconnect()
-            console.print(style_success(f"Task {task.id} is now RUNNING"))
+            
+            content = f"[#00D4FF]ID:[/#00D4FF]     {task.id}\n"
+            content += f"[#00D4FF]Status:[/#00D4FF] [#00D4FF]{task.status}[/#00D4FF]"
+            
+            panel = Panel(
+                content,
+                title=f"[bold #00FF7F]Task Started[/bold #00FF7F]",
+                border_style="#00FF7F",
+                padding=(1, 2),
+            )
+            console.print(panel)
+            
         except PlasmaAgentError as e:
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
@@ -167,7 +216,18 @@ def cancel_task(
             service = TaskService(db)
             task = await service.cancel_task(UUID(task_id))
             await db.disconnect()
-            console.print(style_success(f"Task {task.id} cancelled"))
+            
+            content = f"[#00D4FF]ID:[/#00D4FF]     {task.id}\n"
+            content += f"[#00D4FF]Status:[/#00D4FF] [#FF1493]{task.status}[/#FF1493]"
+            
+            panel = Panel(
+                content,
+                title=f"[bold #FFD700]Task Cancelled[/bold #FFD700]",
+                border_style="#FFD700",
+                padding=(1, 2),
+            )
+            console.print(panel)
+            
         except PlasmaAgentError as e:
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
@@ -187,7 +247,18 @@ def retry_task(
             service = TaskService(db)
             task = await service.retry_task(UUID(task_id))
             await db.disconnect()
-            console.print(style_success(f"Task {task.id} reset to PENDING"))
+            
+            content = f"[#00D4FF]ID:[/#00D4FF]     {task.id}\n"
+            content += f"[#00D4FF]Status:[/#00D4FF] [#FFD700]{task.status}[/#FFD700]"
+            
+            panel = Panel(
+                content,
+                title=f"[bold #00FF7F]Task Queued for Retry[/bold #00FF7F]",
+                border_style="#00FF7F",
+                padding=(1, 2),
+            )
+            console.print(panel)
+            
         except PlasmaAgentError as e:
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
@@ -213,8 +284,18 @@ def delete_task(
             service = TaskService(db)
             deleted = await service.delete_task(UUID(task_id))
             await db.disconnect()
+            
             if deleted:
-                console.print(style_success(f"Task {task_id} deleted"))
+                content = f"[#FF00D4]ID:[/#FF00D4]     {task_id}\n"
+                content += f"[#FF00D4]Status:[/#FF00D4] DELETED"
+                
+                panel = Panel(
+                    content,
+                    title=f"[bold #FF00D4]Task Deleted[/bold #FF00D4]",
+                    border_style="#FF00D4",
+                    padding=(1, 2),
+                )
+                console.print(panel)
             else:
                 console.print(style_error(f"Task {task_id} not found"))
         except PlasmaAgentError as e:
