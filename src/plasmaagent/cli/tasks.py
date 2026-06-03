@@ -204,10 +204,21 @@ def show_task(
 ) -> None:
     async def _show() -> None:
         try:
+            try:
+                task_uuid = UUID(task_id)
+            except ValueError:
+                console.print(style_error(f"Invalid task ID format: {task_id}"))
+                raise typer.Exit(1)
+
             db = get_database()
             await db.connect()
             service = TaskService(db)
-            task = await service.get_task(UUID(task_id))
+            task = await service.get_task(task_uuid)
+
+            if not task:
+                console.print(style_error(f"Task not found: {task_id}"))
+                await db.disconnect()
+                raise typer.Exit(1)
 
             status_colors = {
                 "PENDING": "#FFD700",
@@ -245,7 +256,7 @@ def show_task(
             console.print(panel)
 
             if show_steps:
-                steps = await service.get_task_steps(UUID(task_id))
+                steps = await service.get_task_steps(task_uuid)
                 if steps:
                     console.print()
                     steps_table = Table(
@@ -282,7 +293,7 @@ def show_task(
                     console.print("\n" + style_info("No execution steps yet"))
 
             if show_logs:
-                logs = await service.get_execution_logs(UUID(task_id))
+                logs = await service.get_execution_logs(task_uuid)
                 if logs:
                     console.print()
                     log_text = Text()
@@ -323,12 +334,23 @@ def run_task(
 ) -> None:
     async def _run() -> None:
         try:
+            try:
+                task_uuid = UUID(task_id)
+            except ValueError:
+                console.print(style_error(f"Invalid task ID format: {task_id}"))
+                raise typer.Exit(1)
+
             db = get_database()
             await db.connect()
             task_service = TaskService(db)
             execution_service = ExecutionService(db)
 
-            task = await task_service.get_task(UUID(task_id))
+            task = await task_service.get_task(task_uuid)
+
+            if not task:
+                console.print(style_error(f"Task not found: {task_id}"))
+                await db.disconnect()
+                raise typer.Exit(1)
 
             if not task.payload or not task.payload.get("commands"):
                 console.print(
@@ -385,7 +407,7 @@ def run_task(
                         )
 
             final_task = await execution_service.execute_task(
-                UUID(task_id),
+                task_uuid,
                 on_step_start=_on_step_start,
                 on_step_output=_on_step_output,
                 on_step_complete=_on_step_complete,
@@ -424,10 +446,16 @@ def cancel_task(
 ) -> None:
     async def _cancel() -> None:
         try:
+            try:
+                task_uuid = UUID(task_id)
+            except ValueError:
+                console.print(style_error(f"Invalid task ID format: {task_id}"))
+                raise typer.Exit(1)
+
             db = get_database()
             await db.connect()
             service = TaskService(db)
-            task = await service.cancel_task(UUID(task_id))
+            task = await service.cancel_task(task_uuid)
             await db.disconnect()
 
             content = (
@@ -454,10 +482,16 @@ def retry_task(
 ) -> None:
     async def _retry() -> None:
         try:
+            try:
+                task_uuid = UUID(task_id)
+            except ValueError:
+                console.print(style_error(f"Invalid task ID format: {task_id}"))
+                raise typer.Exit(1)
+
             db = get_database()
             await db.connect()
             service = TaskService(db)
-            task = await service.retry_task(UUID(task_id))
+            task = await service.retry_task(task_uuid)
             await db.disconnect()
 
             content = (
@@ -498,10 +532,16 @@ def delete_task(
 
     async def _delete() -> None:
         try:
+            try:
+                task_uuid = UUID(task_id)
+            except ValueError:
+                console.print(style_error(f"Invalid task ID format: {task_id}"))
+                raise typer.Exit(1)
+
             db = get_database()
             await db.connect()
             service = TaskService(db)
-            deleted = await service.delete_task(UUID(task_id))
+            deleted = await service.delete_task(task_uuid)
             await db.disconnect()
 
             if deleted:

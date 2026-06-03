@@ -67,9 +67,13 @@ def metrics(
 
         try:
             service = MetricsAggregationService(db)
-            query = MetricsQuery(time_range=TimeRange.CUSTOM)
-            query.start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-            query.end_time = datetime.now(timezone.utc)
+            start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+            end_time = datetime.now(timezone.utc)
+            query = MetricsQuery(
+                time_range=TimeRange.CUSTOM,
+                start_time=start_time,
+                end_time=end_time,
+            )
 
             metrics = await service.get_execution_metrics(query)
             system = await service.get_system_metrics()
@@ -80,12 +84,12 @@ def metrics(
             console.print(f"  Failed:              [red]{metrics.failed_executions}[/red]")
             console.print(f"  Success Rate:        [bold]{metrics.success_rate * 100:.1f}%[/bold]")
 
-            if metrics.avg_execution_time_ms:
-                console.print(f"  Avg Time:            {metrics.avg_execution_time_ms:.0f}ms")
-            if metrics.p50_execution_time_ms:
-                console.print(f"  P50 Time:            {metrics.p50_execution_time_ms:.0f}ms")
-            if metrics.p95_execution_time_ms:
-                console.print(f"  P95 Time:            {metrics.p95_execution_time_ms:.0f}ms")
+            if metrics.avg_duration_ms:
+                console.print(f"  Avg Time:            {metrics.avg_duration_ms:.0f}ms")
+            if metrics.p50_duration_ms:
+                console.print(f"  P50 Time:            {metrics.p50_duration_ms:.0f}ms")
+            if metrics.p95_duration_ms:
+                console.print(f"  P95 Time:            {metrics.p95_duration_ms:.0f}ms")
             if metrics.throughput_per_minute:
                 console.print(f"  Throughput:          {metrics.throughput_per_minute:.1f}/min")
 
