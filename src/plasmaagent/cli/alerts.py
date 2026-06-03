@@ -29,16 +29,21 @@ def create_rule(
     severity: AlertSeverity = typer.Option(AlertSeverity.WARNING, "--severity", "-s", help="Alert severity"),
     description: str = typer.Option("", "--description", "-d", help="Rule description"),
     cooldown: int = typer.Option(300, "--cooldown", help="Cooldown in seconds"),
+    force: bool = typer.Option(False, "--force", "-f", help="Overwrite existing rule with same name"),
 ) -> None:
     async def create() -> None:
         from plasmaagent.core.database import get_database
-        from plasmaagent.observability.alert_service import AlertService
+        from plasmaagent.observability.alert_service import AlertService, DuplicateAlertRuleError
 
         db = get_database()
         await db.connect()
 
         try:
             service = AlertService(db)
+
+            if force:
+                await service.delete_rule_by_name(name)
+
             rule_data = AlertRuleCreate(
                 name=name,
                 description=description,
@@ -49,7 +54,13 @@ def create_rule(
                 webhook_url=webhook,
                 cooldown_seconds=cooldown,
             )
-            rule = await service.create_rule(rule_data)
+
+            try:
+                rule = await service.create_rule(rule_data)
+            except DuplicateAlertRuleError:
+                console.print(f"\n[red]Error: Alert rule '{name}' already exists.[/red]")
+                console.print(f"[yellow]Use --force to overwrite or choose a different name.[/yellow]\n")
+                raise typer.Exit(1)
 
             console.print(f"\n[bold green]✓ Alert rule created[/bold green]\n")
             console.print(f"  ID:        {rule.id}")
@@ -85,7 +96,7 @@ def list_rules(
                 console.print("\n[yellow]No alert rules found[/yellow]\n")
                 return
 
-            console.print(f"\n[bold cyan]📋 Alert Rules ({len(rules)})[/bold cyan]\n")
+            console.print(f"\n[bold cyan]Alert Rules ({len(rules)})[/bold cyan]\n")
 
             for rule in rules:
                 status_icon = "✓" if rule.enabled else "✗"
@@ -161,7 +172,7 @@ def list_events(
                 console.print("\n[yellow]No alert events found[/yellow]\n")
                 return
 
-            console.print(f"\n[bold cyan]🔔 Recent Alert Events ({len(events)})[/bold cyan]\n")
+            console.print(f"\n[bold cyan]Recent Alert Events ({len(events)})[/bold cyan]\n")
 
             for event in events:
                 severity_color = {"info": "blue", "warning": "yellow", "critical": "red"}.get(

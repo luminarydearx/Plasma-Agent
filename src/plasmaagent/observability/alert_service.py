@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import httpx
+from psycopg.errors import UniqueViolation
 
 from plasmaagent.observability.alert_models import (
     AlertCondition,
@@ -21,6 +22,12 @@ if TYPE_CHECKING:
     from plasmaagent.core.database import Database
 
 
+class DuplicateAlertRuleError(Exception):
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"Alert rule with name '{name}' already exists")
+
+
 class AlertService:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -29,26 +36,30 @@ class AlertService:
         new_id = uuid4()
         async with self._db.transaction() as conn:
             async with conn.cursor() as cur:
-                await cur.execute(
-                    """INSERT INTO alert_rules
-                       (id, name, description, metric_name, condition, threshold, severity,
-                        webhook_url, enabled, cooldown_seconds, status)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                       RETURNING created_at, updated_at""",
-                    (
-                        new_id,
-                        rule_data.name,
-                        rule_data.description,
-                        rule_data.metric_name,
-                        rule_data.condition.value,
-                        rule_data.threshold,
-                        rule_data.severity.value,
-                        rule_data.webhook_url,
-                        rule_data.enabled,
-                        rule_data.cooldown_seconds,
-                        AlertStatus.ACTIVE.value,
-                    ),
-                )
+                try:
+                    await cur.execute(
+                        """INSERT INTO alert_rules
+                           (id, name, description, metric_name, condition, threshold, severity,
+                            webhook_url, enabled, cooldown_seconds, status)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                           RETURNING created_at, updated_at""",
+                        (
+                            new_id,
+                            rule_data.name,
+                            rule_data.description,
+                            rule_data.metric_name,
+                            rule_data.condition.value,
+                            rule_data.threshold,
+                            rule_data.severity.value,
+                            rule_data.webhook_url,
+                            rule_data.enabled,
+                            rule_data.cooldown_seconds,
+                            AlertStatus.ACTIVE.value,
+                        ),
+                    )
+                except UniqueViolation:
+                    raise DuplicateAlertRuleError(rule_data.name)
+
                 row = await cur.fetchone()
                 if row is None:
                     raise RuntimeError("Failed to create alert rule")
@@ -181,6 +192,12 @@ class AlertService:
         async with self._db.transaction() as conn:
             async with conn.cursor() as cur:
                 await cur.execute("DELETE FROM alert_rules WHERE id = %s", (rule_id,))
+                return cur.rowcount > 0
+
+    async def delete_rule_by_name(self, name: str) -> bool:
+        async with self._db.transaction() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("DELETE FROM alert_rules WHERE name = %s", (name,))
                 return cur.rowcount > 0
 
     async def evaluate_condition(self, condition: AlertCondition, value: float, threshold: float) -> bool:
