@@ -1,178 +1,194 @@
+from __future__ import annotations
+
 import re
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
-from .models import ExecutionContext, SessionContext
+
+from plasmaagent.ai.context.models import (
+    ContextEntry,
+    ContextSnapshot,
+    ContextVariableType,
+    TaskExecutionResult,
+)
+
+MAX_VARIABLES_PER_SESSION = 1000
+MAX_VARIABLE_NAME_LENGTH = 100
+MAX_VARIABLE_VALUE_LENGTH = 50000
+MAX_SESSION_ID_LENGTH = 100
+VARIABLE_PATTERN = re.compile(r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}")
 
 
 class ContextManager:
-    VARIABLE_PATTERN = re.compile(r"\$\{([a-zA-Z0-9_\-]+)\.([a-zA-Z_]+)\}")
-    MAX_VARIABLE_LENGTH = 10000
-    MAX_SESSIONS = 100
-    
-    def __init__(self) -> None:
-        self._sessions: dict[str, SessionContext] = {}
-    
-    def create_session(self, session_id: str | None = None) -> SessionContext:
-        if session_id is None:
-            session_id = str(uuid.uuid4())
-        
-        if len(self._sessions) >= self.MAX_SESSIONS:
-            oldest_session_id = min(
-                self._sessions.keys(),
-                key=lambda sid: self._sessions[sid].created_at
-            )
-            self.delete_session(oldest_session_id)
-        
-        session = SessionContext(
-            session_id=session_id,
-            created_at=datetime.now(timezone.utc),
-            executions=[],
-            variables={}
+    def __init__(self, session_id: str | None = None) -> None:
+        self._validate_session_id(session_id)
+        self._session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self._entries: dict[str, ContextEntry] = {}
+        self._task_results: list[TaskExecutionResult] = []
+        self._created_at = datetime.now()
+
+    def _validate_session_id(self, session_id: str | None) -> None:
+        if session_id is not None:
+            if not isinstance(session_id, str):
+                raise TypeError("session_id must be a string")
+            if not session_id.strip():
+                raise ValueError("session_id cannot be empty")
+            if len(session_id) > MAX_SESSION_ID_LENGTH:
+                raise ValueError(f"session_id too long (max {MAX_SESSION_ID_LENGTH} chars)")
+            if "\x00" in session_id:
+                raise ValueError("session_id cannot contain null bytes")
+
+    def _validate_variable_name(self, name: str) -> None:
+        if not isinstance(name, str):
+            raise TypeError("variable_name must be a string")
+        if not name.strip():
+            raise ValueError("variable_name cannot be empty")
+        if len(name) > MAX_VARIABLE_NAME_LENGTH:
+            raise ValueError(f"variable_name too long (max {MAX_VARIABLE_NAME_LENGTH} chars)")
+        if "\x00" in name:
+            raise ValueError("variable_name cannot contain null bytes")
+        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_.]*$", name):
+            raise ValueError("variable_name must start with letter/underscore and contain only alphanumeric/underscore/dot")
+
+    def _validate_value(self, value: Any) -> None:
+        if isinstance(value, str):
+            if "\x00" in value:
+                raise ValueError("value cannot contain null bytes")
+            if len(value) > MAX_VARIABLE_VALUE_LENGTH:
+                raise ValueError(f"value too long (max {MAX_VARIABLE_VALUE_LENGTH} chars)")
+
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
+    @property
+    def entry_count(self) -> int:
+        return len(self._entries)
+
+    @property
+    def result_count(self) -> int:
+        return len(self._task_results)
+
+    def record_task_result(self, result: TaskExecutionResult) -> None:
+        if not isinstance(result, TaskExecutionResult):
+            raise TypeError("result must be a TaskExecutionResult instance")
+
+        self._task_results.append(result)
+
+        self._auto_set_variable(result.task_id, "status", ContextVariableType.CUSTOM, result.status)
+        if result.output is not None:
+            self._auto_set_variable(result.task_id, "output", ContextVariableType.OUTPUT, result.output)
+        if result.stdout is not None:
+            self._auto_set_variable(result.task_id, "stdout", ContextVariableType.STDOUT, result.stdout)
+        if result.stderr is not None:
+            self._auto_set_variable(result.task_id, "stderr", ContextVariableType.STDERR, result.stderr)
+        if result.error is not None:
+            self._auto_set_variable(result.task_id, "error", ContextVariableType.ERROR, result.error)
+        if result.exit_code is not None:
+            self._auto_set_variable(result.task_id, "exit_code", ContextVariableType.EXIT_CODE, result.exit_code)
+        if result.duration_ms is not None:
+            self._auto_set_variable(result.task_id, "duration_ms", ContextVariableType.DURATION_MS, result.duration_ms)
+
+    def _auto_set_variable(
+        self,
+        task_id: str,
+        variable_name: str,
+        variable_type: ContextVariableType,
+        value: Any,
+    ) -> None:
+        full_name = f"{task_id}.{variable_name}"
+        try:
+            self.set_variable(full_name, value, variable_type, task_id)
+        except ValueError:
+            pass
+
+    def set_variable(
+        self,
+        name: str,
+        value: Any,
+        variable_type: ContextVariableType = ContextVariableType.CUSTOM,
+        task_id: str | None = None,
+    ) -> None:
+        self._validate_variable_name(name)
+        self._validate_value(value)
+
+        if len(self._entries) >= MAX_VARIABLES_PER_SESSION and name not in self._entries:
+            raise ValueError(f"Maximum variables per session reached ({MAX_VARIABLES_PER_SESSION})")
+
+        entry = ContextEntry(
+            task_id=task_id or "global",
+            variable_name=name,
+            variable_type=variable_type,
+            value=value,
+            timestamp=datetime.now(),
         )
-        self._sessions[session_id] = session
-        return session
-    
-    def get_session(self, session_id: str) -> SessionContext | None:
-        return self._sessions.get(session_id)
-    
-    def delete_session(self, session_id: str) -> bool:
-        if session_id in self._sessions:
-            del self._sessions[session_id]
+        self._entries[name] = entry
+
+    def get_variable(self, name: str, default: Any = None) -> Any:
+        if not isinstance(name, str):
+            raise TypeError("variable_name must be a string")
+        entry = self._entries.get(name)
+        return entry.value if entry is not None else default
+
+    def has_variable(self, name: str) -> bool:
+        return name in self._entries
+
+    def delete_variable(self, name: str) -> bool:
+        if name in self._entries:
+            del self._entries[name]
             return True
         return False
-    
-    def clear_all_sessions(self) -> int:
-        count = len(self._sessions)
-        self._sessions.clear()
-        return count
-    
-    def add_execution(
-        self,
-        session_id: str,
-        task_id: str,
-        output: str = "",
-        exit_code: int = 0,
-        duration_ms: int = 0,
-        metadata: dict[str, Any] | None = None
-    ) -> ExecutionContext:
-        session = self._sessions.get(session_id)
-        if session is None:
-            raise ValueError(f"Session {session_id} not found")
-        
-        execution = ExecutionContext(
-            task_id=task_id,
-            output=output[:100000],
-            exit_code=exit_code,
-            duration_ms=duration_ms,
-            started_at=datetime.now(timezone.utc),
-            completed_at=datetime.now(timezone.utc),
-            metadata=metadata or {}
+
+    def get_previous_result(self) -> TaskExecutionResult | None:
+        return self._task_results[-1] if self._task_results else None
+
+    def get_task_result(self, task_id: str) -> TaskExecutionResult | None:
+        for result in reversed(self._task_results):
+            if result.task_id == task_id:
+                return result
+        return None
+
+    def substitute(self, text: str, default: str = "") -> str:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        if "\x00" in text:
+            raise ValueError("text cannot contain null bytes")
+
+        def replacer(match: re.Match[str]) -> str:
+            var_name = match.group(1)
+            value = self.get_variable(var_name)
+            if value is None:
+                return default
+            return str(value)
+
+        return VARIABLE_PATTERN.sub(replacer, text)
+
+    def find_variables(self, text: str) -> list[str]:
+        if not isinstance(text, str):
+            raise TypeError("text must be a string")
+        return VARIABLE_PATTERN.findall(text)
+
+    def list_variables(self, prefix: str | None = None) -> list[str]:
+        if prefix is None:
+            return sorted(self._entries.keys())
+        return sorted(name for name in self._entries.keys() if name.startswith(prefix))
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._task_results.clear()
+
+    def snapshot(self) -> ContextSnapshot:
+        return ContextSnapshot(
+            session_id=self._session_id,
+            entries=tuple(self._entries.values()),
+            task_results=tuple(self._task_results),
+            created_at=self._created_at,
         )
-        
-        new_executions = list(session.executions) + [execution]
-        updated_session = SessionContext(
-            session_id=session.session_id,
-            created_at=session.created_at,
-            executions=new_executions,
-            variables=session.variables
-        )
-        self._sessions[session_id] = updated_session
-        
-        return execution
-    
-    def set_variable(self, session_id: str, name: str, value: str) -> None:
-        session = self._sessions.get(session_id)
-        if session is None:
-            raise ValueError(f"Session {session_id} not found")
-        
-        new_variables = dict(session.variables)
-        new_variables[name] = value[:self.MAX_VARIABLE_LENGTH]
-        
-        updated_session = SessionContext(
-            session_id=session.session_id,
-            created_at=session.created_at,
-            executions=session.executions,
-            variables=new_variables
-        )
-        self._sessions[session_id] = updated_session
-    
-    def get_variable(self, session_id: str, name: str) -> str | None:
-        session = self._sessions.get(session_id)
-        if session is None:
-            return None
-        return session.variables.get(name)
-    
-    def substitute_variables(self, session_id: str, text: str) -> str:
-        session = self._sessions.get(session_id)
-        if session is None:
-            return text
-        
-        def replace_match(match: re.Match) -> str:
-            task_id = match.group(1)
-            field_name = match.group(2)
-            
-            if task_id == "var":
-                return session.variables.get(field_name, match.group(0))
-            
-            execution = session.get_execution(task_id)
-            if execution is None:
-                return match.group(0)
-            
-            if field_name == "output":
-                return execution.output
-            elif field_name == "exit_code":
-                return str(execution.exit_code)
-            elif field_name == "duration":
-                return str(execution.duration_ms)
-            elif field_name == "success":
-                return str(execution.success).lower()
-            elif field_name == "failed":
-                return str(execution.failed).lower()
-            else:
-                return match.group(0)
-        
-        return self.VARIABLE_PATTERN.sub(replace_match, text)
-    
-    def get_execution_history(self, session_id: str) -> list[ExecutionContext]:
-        session = self._sessions.get(session_id)
-        if session is None:
-            return []
-        return list(session.executions)
-    
-    def get_last_execution(self, session_id: str) -> ExecutionContext | None:
-        session = self._sessions.get(session_id)
-        if session is None or session.execution_count == 0:
-            return None
-        return session.executions[-1]
-    
-    def get_session_stats(self, session_id: str) -> dict[str, Any]:
-        session = self._sessions.get(session_id)
-        if session is None:
-            return {
-                "execution_count": 0,
-                "success_count": 0,
-                "failure_count": 0,
-                "success_rate": 0.0,
-                "total_duration_ms": 0,
-                "avg_duration_ms": 0.0
-            }
-        
-        total_duration = sum(e.duration_ms for e in session.executions)
-        avg_duration = total_duration / session.execution_count if session.execution_count > 0 else 0.0
-        
-        return {
-            "execution_count": session.execution_count,
-            "success_count": session.success_count,
-            "failure_count": session.failure_count,
-            "success_rate": session.success_rate,
-            "total_duration_ms": total_duration,
-            "avg_duration_ms": avg_duration
-        }
-    
-    @property
-    def session_count(self) -> int:
-        return len(self._sessions)
-    
-    def list_sessions(self) -> list[str]:
-        return list(self._sessions.keys())
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._entries
+
+    def __repr__(self) -> str:
+        return f"ContextManager(session_id='{self._session_id}', entries={len(self._entries)}, results={len(self._task_results)})"

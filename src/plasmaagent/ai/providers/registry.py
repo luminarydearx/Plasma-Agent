@@ -36,3 +36,5 @@ def set_default_provider(name: str) -> None:
 def delete_provider(name: str) -> None:
     if name in _PROVIDER_REGISTRY:
         del _PROVIDER_REGISTRY[name]
+    else:
+        raise ValueError(f"Provider '{name}' not found in registry")

@@ -1,4 +1,15 @@
-from .manager import ContextManager
-from .models import ExecutionContext, SessionContext
+from plasmaagent.ai.context.manager import ContextManager
+from plasmaagent.ai.context.models import (
+    ContextEntry,
+    ContextSnapshot,
+    ContextVariableType,
+    TaskExecutionResult,
+)
 
-__all__ = ["ContextManager", "ExecutionContext", "SessionContext"]
+__all__ = [
+    "ContextEntry",
+    "ContextManager",
+    "ContextSnapshot",
+    "ContextVariableType",
+    "TaskExecutionResult",
+]

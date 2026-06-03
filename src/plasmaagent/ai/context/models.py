@@ -1,56 +1,67 @@
+from __future__ import annotations
+
 from datetime import datetime
+from enum import Enum
 from typing import Any
-from pydantic import BaseModel, ConfigDict, Field
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class ExecutionContext(BaseModel):
-    model_config = ConfigDict(frozen=True)
-    
-    task_id: str = Field(..., min_length=1, max_length=36)
-    output: str = Field(default="", max_length=100000)
-    exit_code: int = Field(default=0, ge=-128, le=255)
-    duration_ms: int = Field(default=0, ge=0, le=3600000)
-    started_at: datetime = Field(default_factory=datetime.utcnow)
-    completed_at: datetime = Field(default_factory=datetime.utcnow)
+class ContextVariableType(str, Enum):
+    OUTPUT = "output"
+    EXIT_CODE = "exit_code"
+    ERROR = "error"
+    DURATION_MS = "duration_ms"
+    STDOUT = "stdout"
+    STDERR = "stderr"
+    CUSTOM = "custom"
+
+
+class ContextEntry(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    task_id: str = Field(min_length=1, max_length=100)
+    variable_name: str = Field(min_length=1, max_length=100)
+    variable_type: ContextVariableType
+    value: Any
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+    @field_validator("task_id")
+    @classmethod
+    def validate_task_id(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("task_id cannot be empty")
+        return v.strip()
+
+    @field_validator("variable_name")
+    @classmethod
+    def validate_variable_name(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("variable_name cannot be empty")
+        if not v.replace("_", "").replace(".", "").isalnum():
+            raise ValueError("variable_name must be alphanumeric (underscores and dots allowed)")
+        return v.strip()
+
+
+class TaskExecutionResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    task_id: str = Field(min_length=1, max_length=100)
+    status: str = Field(min_length=1, max_length=50)
+    output: str | None = None
+    stdout: str | None = None
+    stderr: str | None = None
+    error: str | None = None
+    exit_code: int | None = None
+    duration_ms: int | None = Field(ge=0, default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    
-    @property
-    def success(self) -> bool:
-        return self.exit_code == 0
-    
-    @property
-    def failed(self) -> bool:
-        return self.exit_code != 0
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 
-class SessionContext(BaseModel):
-    model_config = ConfigDict(frozen=True)
-    
-    session_id: str = Field(..., min_length=1, max_length=36)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    executions: list[ExecutionContext] = Field(default_factory=list)
-    variables: dict[str, str] = Field(default_factory=dict)
-    
-    def get_execution(self, task_id: str) -> ExecutionContext | None:
-        for execution in self.executions:
-            if execution.task_id == task_id:
-                return execution
-        return None
-    
-    @property
-    def execution_count(self) -> int:
-        return len(self.executions)
-    
-    @property
-    def success_count(self) -> int:
-        return sum(1 for e in self.executions if e.success)
-    
-    @property
-    def failure_count(self) -> int:
-        return sum(1 for e in self.executions if e.failed)
-    
-    @property
-    def success_rate(self) -> float:
-        if self.execution_count == 0:
-            return 0.0
-        return self.success_count / self.execution_count
+class ContextSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=100)
+    entries: tuple[ContextEntry, ...] = Field(default_factory=tuple)
+    task_results: tuple[TaskExecutionResult, ...] = Field(default_factory=tuple)
+    created_at: datetime = Field(default_factory=datetime.now)
