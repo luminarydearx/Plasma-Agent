@@ -5,6 +5,7 @@ from plasmaagent.scheduling.models import (
 )
 from plasmaagent.scheduling.service import SchedulingService
 from plasmaagent.scheduling.worker import SchedulerWorker
+from plasmaagent.scheduling.onetime import OneTimeScheduler
 
 __all__ = [
     "MissedRunPolicy",
@@ -12,4 +13,5 @@ __all__ = [
     "TaskScheduleUpdate",
     "SchedulingService",
     "SchedulerWorker",
+    "OneTimeScheduler",
 ]
