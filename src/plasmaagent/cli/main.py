@@ -13,6 +13,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
 def version_callback(value: bool) -> None:
     if value:
         console.print(f"[#00D4FF]PlasmaAgent v{__version__}[/#00D4FF]")
@@ -108,8 +109,10 @@ def hello() -> None:
 
 def register_commands() -> None:
     from plasmaagent.cli import tasks
+    from plasmaagent.cli import metrics
 
     app.add_typer(tasks.app, name="task", help="Task management commands")
+    app.add_typer(metrics.app, name="metrics", help="Template metrics and analytics")
 
 
 register_commands()

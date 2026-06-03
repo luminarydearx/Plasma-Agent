@@ -1,11 +1,10 @@
 import asyncio
+import sys
 from typing import Optional
 from uuid import UUID
 
 import typer
-from rich.live import Live
 from rich.panel import Panel
-from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -19,6 +18,52 @@ from plasmaagent.services.execution_service import ExecutionService
 from plasmaagent.services.task_service import TaskService
 
 app = typer.Typer(no_args_is_help=True)
+
+MAX_INPUT_LENGTH = 10000
+
+
+def _is_interactive_terminal() -> bool:
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+def _validate_natural_language_input(value: Optional[str]) -> str:
+    if value is None:
+        if not _is_interactive_terminal():
+            raise typer.BadParameter(
+                "No input provided. Use --input \"your task description\" "
+                "or run in an interactive terminal."
+            )
+        prompted = typer.prompt("Describe the task in natural language")
+        value = prompted
+
+    if not isinstance(value, str):
+        raise typer.BadParameter(
+            f"Input must be a string, got {type(value).__name__}"
+        )
+
+    if len(value) > MAX_INPUT_LENGTH:
+        raise typer.BadParameter(
+            f"Input too long ({len(value)} chars). "
+            f"Maximum is {MAX_INPUT_LENGTH} characters."
+        )
+
+    stripped = value.strip()
+    if not stripped:
+        raise typer.BadParameter(
+            "Input cannot be empty or whitespace only. "
+            "Please provide a meaningful task description."
+        )
+
+    null_bytes = stripped.count("\x00")
+    if null_bytes > 0:
+        raise typer.BadParameter(
+            f"Input contains {null_bytes} null byte(s) which is not allowed."
+        )
+
+    return stripped
 
 
 @app.command("create")
@@ -305,7 +350,6 @@ def run_task(
             )
 
             current_step: list[int] = [0]
-            output_buffer: list[str] = []
 
             async def _on_step_start(step_order: int, command: str) -> None:
                 current_step[0] = step_order
@@ -440,6 +484,14 @@ def delete_task(
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
 ) -> None:
     if not force:
+        if not _is_interactive_terminal():
+            console.print(
+                style_error(
+                    "Non-interactive mode requires --force flag to delete tasks. "
+                    "Use: plasma task delete --id <ID> --force"
+                )
+            )
+            raise typer.Exit(1)
         confirm = typer.confirm(f"Delete task {task_id}?")
         if not confirm:
             raise typer.Abort()
@@ -489,17 +541,24 @@ def generate_task(
     ),
 ) -> None:
     async def _generate() -> None:
+        from plasmaagent.services.task_generator import TaskGeneratorService
+        from plasmaagent.ai.providers import get_provider
+
         try:
-            from plasmaagent.services.task_generator import TaskGeneratorService
+            natural_language_input = _validate_natural_language_input(natural_language)
+        except typer.BadParameter as e:
+            console.print(style_error(f"Error: {e}"))
+            raise typer.Exit(1)
 
-            if not natural_language:
-                natural_language_input = typer.prompt(
-                    "Describe the task in natural language"
-                )
-            else:
-                natural_language_input = natural_language
+        if provider is not None:
+            try:
+                get_provider(provider)
+            except ValueError as e:
+                console.print(style_error(f"Error: {e}"))
+                raise typer.Exit(1)
 
-            db = get_database()
+        db = get_database()
+        try:
             await db.connect()
             generator_service = TaskGeneratorService(db)
 
@@ -523,7 +582,6 @@ def generate_task(
                         "Try being more specific or use 'plasma task create' for manual creation."
                     )
                 )
-                await db.disconnect()
                 raise typer.Exit(1)
 
             generated = response.tasks[0]
@@ -547,19 +605,23 @@ def generate_task(
             console.print()
 
             if preview_only:
-                await db.disconnect()
                 return
 
             if not auto_confirm:
+                if not _is_interactive_terminal():
+                    console.print(
+                        style_error(
+                            "Non-interactive mode requires --yes flag to create tasks. "
+                            "Use: plasma task generate --input \"...\" --yes"
+                        )
+                    )
+                    raise typer.Exit(1)
                 confirm = typer.confirm("Create this task?")
                 if not confirm:
                     console.print(style_info("Task creation cancelled"))
-                    await db.disconnect()
                     raise typer.Abort()
 
             task_id = await generator_service.create_task_from_generation(generated)
-
-            await db.disconnect()
 
             content = (
                 f"[#00D4FF]ID:[/#00D4FF]       {task_id}\n"
@@ -582,6 +644,14 @@ def generate_task(
         except PlasmaAgentError as e:
             console.print(style_error(f"Error: {e}"))
             raise typer.Exit(1)
+        except typer.Exit:
+            raise
+        except typer.Abort:
+            raise
+        except Exception as e:
+            console.print(style_error(f"Unexpected error: {e}"))
+            raise typer.Exit(1)
+        finally:
+            await db.disconnect()
 
     run_async(_generate())
-

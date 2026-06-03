@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Optional
 from plasmaagent.ai.providers import get_provider, list_providers
 from plasmaagent.ai.models import (
@@ -8,12 +9,14 @@ from plasmaagent.ai.models import (
 from plasmaagent.core.database import Database
 from plasmaagent.models.task import TaskCreate, TaskPayload
 from plasmaagent.services.task_service import TaskService
+from plasmaagent.services.template_metrics_service import TemplateMetricsService
 
 
 class TaskGeneratorService:
     def __init__(self, db: Database):
         self._db = db
         self._task_service = TaskService(db)
+        self._metrics_service = TemplateMetricsService(db)
 
     async def generate_from_natural_language(
         self,
@@ -29,7 +32,36 @@ class TaskGeneratorService:
         )
         
         response = provider.generate_tasks(request)
+        
+        await self._record_generation_metrics(
+            response=response,
+            provider_name=provider_name or provider.name,
+        )
+        
         return response
+
+    async def _record_generation_metrics(
+        self,
+        response: TaskGenerationResponse,
+        provider_name: str,
+    ) -> None:
+        if not response.tasks:
+            return
+        
+        for task in response.tasks:
+            if not task.template_used:
+                continue
+            
+            try:
+                await self._metrics_service.record_usage(
+                    template_name=task.template_used,
+                    pattern=response.provider_used,
+                    confidence=Decimal(str(task.confidence)),
+                    generation_time_ms=int(response.total_time_ms),
+                    success=True,
+                )
+            except Exception:
+                pass
 
     async def create_task_from_generation(
         self,

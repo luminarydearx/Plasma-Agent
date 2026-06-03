@@ -1,51 +1,44 @@
 from rich.console import Console
 from rich.panel import Panel
-from rich.style import Style
-from rich.theme import Theme
+from rich.table import Table
+from rich.text import Text
+
+
+console = Console()
+
 
 PLASMA_COLORS = {
     "plasma_cyan": "#00D4FF",
     "plasma_magenta": "#FF00D4",
     "plasma_violet": "#8B00FF",
     "solar_gold": "#FFD700",
-    "solar_orange": "#FF6B35",
-    "nebula_pink": "#FF1493",
     "aurora_green": "#00FF7F",
+    "nebula_pink": "#FF1493",
+    "cosmic_blue": "#0066FF",
+    "stellar_white": "#F0F0FF",
+    "void_black": "#0A0A0F",
+    "deep_space": "#1A1A2E",
 }
-
-plasma_theme = Theme(
-    {
-        "info": Style(color="cyan"),
-        "warning": Style(color="yellow"),
-        "danger": Style(color="magenta", bold=True),
-        "error": Style(color="magenta", bold=True),
-        "success": Style(color="green", bold=True),
-        "highlight": Style(bold=True),
-        "dim": Style(dim=True),
-    }
-)
-
-console = Console(theme=plasma_theme, color_system="truecolor")
 
 
 def style_success(message: str) -> str:
-    color = PLASMA_COLORS["aurora_green"].lstrip("#")
-    return f"[#{color}]{message}[/#{color}]"
+    color = PLASMA_COLORS["aurora_green"]
+    return f"[{color}]{message}[/{color}]"
 
 
 def style_error(message: str) -> str:
-    color = PLASMA_COLORS["plasma_magenta"].lstrip("#")
-    return f"[bold #{color}]{message}[/bold #{color}]"
+    color = PLASMA_COLORS["plasma_magenta"]
+    return f"[{color}]{message}[/{color}]"
 
 
 def style_warning(message: str) -> str:
-    color = PLASMA_COLORS["solar_gold"].lstrip("#")
-    return f"[#{color}]{message}[/{color}]"
+    color = PLASMA_COLORS["solar_gold"]
+    return f"[{color}]{message}[/{color}]"
 
 
 def style_info(message: str) -> str:
-    color = PLASMA_COLORS["plasma_cyan"].lstrip("#")
-    return f"[#{color}]{message}[/{color}]"
+    color = PLASMA_COLORS["plasma_cyan"]
+    return f"[{color}]{message}[/{color}]"
 
 
 def pc(color_name: str) -> str:
