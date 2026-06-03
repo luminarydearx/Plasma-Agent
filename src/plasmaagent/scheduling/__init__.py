@@ -6,6 +6,7 @@ from plasmaagent.scheduling.models import (
 from plasmaagent.scheduling.service import SchedulingService
 from plasmaagent.scheduling.worker import SchedulerWorker
 from plasmaagent.scheduling.onetime import OneTimeScheduler
+from plasmaagent.scheduling.patterns import RecurringPattern, RecurringPatterns
 
 __all__ = [
     "MissedRunPolicy",
@@ -14,4 +15,6 @@ __all__ = [
     "SchedulingService",
     "SchedulerWorker",
     "OneTimeScheduler",
+    "RecurringPattern",
+    "RecurringPatterns",
 ]
