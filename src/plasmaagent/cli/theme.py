@@ -1,10 +1,20 @@
+import os
+import sys
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
 
-console = Console()
+_no_color = bool(os.environ.get("NO_COLOR"))
+_is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+
+console = Console(
+    force_terminal=_is_tty and not _no_color,
+    no_color=_no_color,
+    highlight=False,
+)
 
 
 PLASMA_COLORS = {
