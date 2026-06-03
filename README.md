@@ -1,111 +1,70 @@
 # PlasmaAgent
 
-Database-Centric Agentic Execution Framework
+Database-centric agentic execution framework powered by rule-based intelligence.
 
-## Overview
+## Features
 
-PlasmaAgent is a production-grade execution framework that treats PostgreSQL as the central nervous system of an AI agent. Every action is an atomic transaction. Every state is persistent. Every failure is recoverable.
-
-## Philosophy
-
-- **Database-Centric Architecture**: PostgreSQL is not just storage—it's the engine
-- **State Machine as Core**: All execution is governed by the PostgreSQL Transactional State Machine (PTSM)
-- **Recovery-First Design**: Crash → restart → resume exactly where you left off
-- **Full Observability**: Every action logged, every decision auditable
-
-## Requirements
-
-- Python 3.13.3+
-- PostgreSQL 16+ with pgvector extension
-- uv package manager
-
-## Installation
-
-```bash
-# Clone repository
-git clone <repository-url>
-cd PlasmaAgent
-
-# Install dependencies
-make dev
-
-# Initialize database
-make db-init
-
-# Install CLI
-make install-cli
-```
+- **Task Execution Engine** - Shell commands with real-time output capture
+- **Rule-Based Intelligence** - Natural language → task generation
+- **Self-Improvement Loop** - Metrics tracking & template optimization
+- **PostgreSQL Transactional State Machine** - Reliable task state transitions
+- **Plasma Theme** - Rich CLI with cosmic color palette
 
 ## Quick Start
 
 ```bash
-# Check system health
-plasma doctor
-
-# Create a task
-plasma task create --name "Deploy application" --description "Deploy to production"
-
-# List tasks
-plasma task list
-
-# Run a task
-plasma task run --id <task-uuid>
-
-# Show task details
-plasma task show --id <task-uuid>
+uv sync
+uv run alembic upgrade head
+uv run plasma --help
 ```
 
-## Development
+## CLI Commands
 
 ```bash
-# Run tests
-make test
+# Task management
+plasma task create --name "Backup DB" --command "pg_dump ..."
+plasma task generate --input "backup postgresql plasmaagent" --yes
+plasma task run --id <task-id>
+plasma task list
+plasma task show --id <task-id> --steps --logs
 
-# Run linter
-make lint
+# Metrics & analytics
+plasma metrics show
+plasma metrics analyze
+plasma metrics optimize --dry-run
 
-# Type checking
-make type-check
-
-# Format code
-make format
-
-# Run all checks
-make check
+# Health check
+plasma doctor
 ```
+
+## Testing
+
+```bash
+uv run pytest -v           # All 214 tests
+uv run pytest tests/unit   # Unit tests only
+uv run pytest tests/integration  # Integration tests only
+```
+
+## Project Status
+
+- **Current Phase:** 3.5 Advanced Reasoning
+- **Tests:** 214/214 passing
+- **Roadmap:** See [ROADMAP.md](ROADMAP.md)
 
 ## Architecture
 
-See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
-
-## Project Structure
-
 ```
-PlasmaAgent/
-├── src/plasmaagent/
-│   ├── core/          # Infrastructure (config, database, state machine)
-│   ├── models/        # Data models
-│   ├── services/      # Business logic
-│   ├── cli/           # Command-line interface
-│   └── utils/         # Utilities
-├── tests/             # Test suite
-├── migrations/        # Database migrations
-└── docs/              # Documentation
+src/plasmaagent/
+├── ai/
+│   ├── metrics/        # Template metrics tracker & optimizer
+│   └── providers/      # LLM provider abstraction (rule-based active)
+├── cli/                # Typer-based CLI commands
+├── core/               # Database, config, state machine
+├── executor/           # Shell command execution
+├── models/             # Pydantic models
+└── services/           # Business logic
 ```
-
-## Visual Identity
-
-**Logo:** Plasma Sphere (energy plasma, not Hermes)
-
-**Colors:**
-- Electric Cyan (#00FFFF) — Primary actions
-- Plasma Magenta (#FF00FF) — Errors/warnings
-- Deep Violet (#8B00FF) — Information
 
 ## License
 
-Proprietary - All rights reserved
-
-## Status
-
-**Phase 1: Foundational Core** — In Progress
+MIT
