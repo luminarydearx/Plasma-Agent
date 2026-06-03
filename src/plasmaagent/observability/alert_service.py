@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -26,15 +26,17 @@ class AlertService:
         self._db = db
 
     async def create_rule(self, rule_data: AlertRuleCreate) -> AlertRule:
+        new_id = uuid4()
         async with self._db.transaction() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
                     """INSERT INTO alert_rules
-                       (name, description, metric_name, condition, threshold, severity,
+                       (id, name, description, metric_name, condition, threshold, severity,
                         webhook_url, enabled, cooldown_seconds, status)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                       RETURNING id, created_at, updated_at""",
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       RETURNING created_at, updated_at""",
                     (
+                        new_id,
                         rule_data.name,
                         rule_data.description,
                         rule_data.metric_name,
@@ -52,7 +54,7 @@ class AlertService:
                     raise RuntimeError("Failed to create alert rule")
 
                 return AlertRule(
-                    id=row["id"],
+                    id=new_id,
                     name=rule_data.name,
                     description=rule_data.description,
                     metric_name=rule_data.metric_name,
