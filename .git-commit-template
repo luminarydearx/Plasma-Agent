@@ -1,0 +1,54 @@
+# <emoji> <type>: <subject>
+#
+# [optional body - explain what and why, max 72 chars per line]
+#
+# [optional footer(s) - breaking changes, issue references]
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# EMOJI TYPES (Gitmoji Style)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# ✨ feat:     New feature
+# 🐛 fix:      Bug fix
+# 📝 docs:     Documentation only
+# 🎨 style:    Code style (formatting, semicolons, etc)
+# ♻️ refactor: Code refactoring (no feature/fix)
+# ⚡️ perf:     Performance improvements
+# ✅ test:     Add or update tests
+# 🔧 chore:    Build process, tools, configs
+# 📦 build:    Dependencies, package changes
+# 🚀 deploy:   Deployment scripts, configs
+# 🔥 remove:   Remove code or files
+# 🎉 init:     Initial commit, project setup
+# 🔒️ sec:      Security improvements
+# 🌐 i18n:     Internationalization, localization
+# 💄 ui:       UI/UX improvements
+# 🚧 wip:      Work in progress (temporary)
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RULES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# 1. Subject line: max 50 chars, imperative mood, no period
+# 2. Blank line after subject
+# 3. Body: max 72 chars per line, explain WHAT and WHY
+# 4. Footer: BREAKING CHANGE, Closes #123, References #456
+#
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# EXAMPLES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#
+# ✨ feat: add user authentication system
+#
+# 🐛 fix: resolve memory leak in task executor
+#
+# 📝 docs: update README with installation guide
+#
+# ✅ test: add integration tests for Phase 3.7
+#
+# ♻️ refactor: simplify database connection pooling
+#
+# ⚡️ perf: optimize query performance by 40%
+#
+# 🔧 chore: update dependencies to latest versions
+#

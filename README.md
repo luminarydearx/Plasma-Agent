@@ -4,7 +4,7 @@
 ██████╗ ██╗      █████╗ ███████╗███╗   ███╗ █████╗
 ██╔══██╗██║     ██╔══██╗██╔════╝████╗ ████║██╔══██╗
 ██████╔╝██║     ███████║███████╗██╔████╔██║███████║
-██╔═══╝ ██║     ██╔══██║╚════██║██║╚██╔╝██║██╔══██║
+██╔═══╝ ██║     ██╔══██╗╚════██║██║╚██╔╝██║██╔══██║
 ██║     ███████╗██║  ██║███████║██║ ╚═╝ ██║██║  ██║
 ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝
           ⚡ A G E N T   ⚡
@@ -436,7 +436,7 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 <div align="center">
 
-### 🌟 Made with 💜 by the PlasmaAgent Team
+### 🌟 Made with 💜 Dearly Febriano Irwansyah
 
 **If this project helps you, please consider giving it a ⭐**
 
