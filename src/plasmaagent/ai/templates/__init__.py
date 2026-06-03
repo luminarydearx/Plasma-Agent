@@ -24,12 +24,20 @@ from plasmaagent.ai.templates.retirement import (
     RetirementScanReport,
 )
 from plasmaagent.ai.templates.retirement_service import RetirementService
+from plasmaagent.ai.templates.auto_generator import (
+    TemplateCandidateCreate,
+    TemplateCandidate as AutoTemplateCandidate,
+    CandidateDetectionRequest,
+    CandidateDetectionReport,
+)
+from plasmaagent.ai.templates.auto_generator_service import AutoTemplateGenerator
 
 __all__ = [
     "TemplateLearner",
     "TemplateVersionService",
     "ABTestService",
     "RetirementService",
+    "AutoTemplateGenerator",
     "LearnedTemplate",
     "LearningReport",
     "RollbackReport",
@@ -46,4 +54,8 @@ __all__ = [
     "TemplateRetirementCreate",
     "RetirementScanRequest",
     "RetirementScanReport",
+    "TemplateCandidateCreate",
+    "AutoTemplateCandidate",
+    "CandidateDetectionRequest",
+    "CandidateDetectionReport",
 ]
