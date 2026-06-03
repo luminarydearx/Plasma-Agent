@@ -14,6 +14,8 @@ from plasmaagent.scheduling.dependencies import (
     TaskDependencyCreate,
 )
 from plasmaagent.scheduling.dependency_service import DependencyService
+from plasmaagent.scheduling.state import SchedulerState, SchedulerStateBase
+from plasmaagent.scheduling.persistence import SchedulerPersistence
 
 __all__ = [
     "MissedRunPolicy",
@@ -29,4 +31,7 @@ __all__ = [
     "TaskDependencyBase",
     "TaskDependencyCreate",
     "DependencyService",
+    "SchedulerState",
+    "SchedulerStateBase",
+    "SchedulerPersistence",
 ]
