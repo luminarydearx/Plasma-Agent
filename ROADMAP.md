@@ -6,11 +6,11 @@
 
 | Metric | Value |
 |---|---|
-| **Latest Commit** | `021123c` |
-| **Total Tests** | 214 |
+| **Latest Commit** | `cccf733` |
+| **Total Tests** | 607 |
 | **Test Status** | 100% PASS |
-| **Current Phase** | 3.5 Advanced Reasoning |
-| **Overall Progress** | ~35% |
+| **Current Phase** | 3.6 Template Evolution |
+| **Overall Progress** | ~40% |
 
 ---
 
@@ -45,33 +45,36 @@
 - CLI `plasma metrics show/analyze/optimize`
 - 37 comprehensive tests (cross-phase, stress, security, edge cases)
 
+### Sub-Phase 3.5 - Advanced Reasoning ✅
+- TaskDecomposer (54 unit tests) — pattern-based decomposition
+- ContextManager (84 unit tests) — session isolation, variable substitution
+- ErrorAnalyzer (62 unit tests) — error pattern matching, recovery suggestions
+- DependencyGraph (70 unit tests) — DAG with cycle detection, topological sort
+- ConditionalEvaluator (39 unit tests) — conditional step execution
+- ParallelExecutor (30 unit tests) — semaphore-based concurrency, fail-fast
+- RetryExecutor (31 unit tests) — exponential backoff with jitter
+- ReasoningService (38 unit tests) — orchestrates all components
+- 22 integration tests (end-to-end, stress, security, performance, regression)
+
 ---
 
 ## In Progress
 
-### Sub-Phase 3.5 - Advanced Reasoning 🔄
-**Goal:** Make agent reason about complex tasks, decompose them, and recover from errors.
+### Sub-Phase 3.6 - Template Evolution 🔄
+**Goal:** Learn from user-created tasks and evolve templates automatically.
 
 **Scope:**
-1. Task decomposition engine (complex → sub-tasks)
-2. Context manager (execution history awareness)
-3. Error recovery suggestions
-4. Dependency graph builder (DAG)
-5. Conditional step execution (if/else logic)
-6. Parallel step execution (independent branches)
-7. Retry strategies (exponential backoff, circuit breaker)
+1. Template learner (extract patterns from successful tasks)
+2. Template versioning
+3. A/B testing for templates
+4. Template retirement (low success rate)
+5. Auto-template generation from user patterns
 
-**Estimated:** ~8 hours | ~10 tasks
+**Estimated:** ~5 hours | ~7 tasks
 
 ---
 
 ## Upcoming Phases
-
-### Sub-Phase 3.6 - Template Evolution
-- Learn from successful user tasks
-- Auto-generate new templates from patterns
-- Template versioning & A/B testing
-- Template retirement (low success rate)
 
 ### Sub-Phase 3.7 - Smart Suggestions
 - Next action recommendations
@@ -140,8 +143,8 @@
 
 ---
 
-## Current Focus: Sub-Phase 3.5
+## Current Focus: Sub-Phase 3.6
 
-**Next Action:** Start Task 3.5.1 - Task Decomposition Engine
+**Next Action:** Start Task 3.6.1 - Template Learner
 
-**Planning Doc:** `SUBPHASE_3_5_PLAN.md` (created at start, deleted when done)
+**Planning Doc:** `SUBPHASE_3_6_PLAN.md` (to be created at start)
