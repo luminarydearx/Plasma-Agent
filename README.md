@@ -138,8 +138,8 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/plasmaagent.git
-cd plasmaagent
+git clone https://github.com/luminarydearx/Plasma-Agent.git
+cd Plasma-Agent
 
 # Install dependencies
 uv sync
@@ -216,35 +216,39 @@ uv run plasma ai anomalies --task-id <task-id>
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    CLI Layer (Typer + Rich)                      │
+│                    CLI Layer (Typer + Rich)                     │
 │   plasma task | plasma metrics | plasma ai | plasma doctor      │
 └─────────────────────────────────────────────────────────────────┘
                               │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Service Layer                               │
+│                      Service Layer                              │
 │  TaskService | ExecutionService | TaskGenerator | MetricsTracker│
 └─────────────────────────────────────────────────────────────────┘
                               │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                  Intelligence Layer (Phase 3)                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│                  Intelligence Layer (Phase 3)                   │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
 │  │ Decomposer   │  │ Context Mgr  │  │ Error Analyzer│          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ Retry Exec   │  │ Parallel Exec│  │ Suggestions  │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ Template Lrn │  │ A/B Testing  │  │ Auto-Generate│          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │ Retry Exec   │  │ Parallel Exec│  │ Suggestions  │           │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │ Template Lrn │  │ A/B Testing  │  │ Auto-Generate│           │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
 └─────────────────────────────────────────────────────────────────┘
                               │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Execution Layer (Phase 2)                     │
+│                    Execution Layer (Phase 2)                    │
 │  ShellExecutor | StepManager | ExecutionLogger | RetryExecutor  │
 └─────────────────────────────────────────────────────────────────┘
                               │
+                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│              Data Layer (PostgreSQL + pgvector)                  │
+│              Data Layer (PostgreSQL + pgvector)                 │
 │  tasks | task_steps | execution_logs | template_metrics         │
 │  template_versions | ab_tests | telemetry | alembic_version     │
 └─────────────────────────────────────────────────────────────────┘
@@ -391,8 +395,8 @@ Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md)
 
 ```bash
 # Fork and clone
-git clone https://github.com/yourusername/plasmaagent.git
-cd plasmaagent
+git clone https://github.com/luminarydearx/Plasma-Agent.git
+cd Plasma-Agent
 
 # Create virtualenv
 uv venv
@@ -436,7 +440,7 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 **If this project helps you, please consider giving it a ⭐**
 
-[Report Bug](https://github.com/yourusername/plasmaagent/issues) · [Request Feature](https://github.com/yourusername/plasmaagent/issues)
+[Report Bug](https://github.com/luminarydearx/Plasma-Agent/issues) · [Request Feature](https://github.com/luminarydearx/Plasma-Agent/issues)
 
 ---
 
