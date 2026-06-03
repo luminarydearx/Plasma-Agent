@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TelemetryBase(BaseModel):
@@ -15,8 +15,7 @@ class TelemetryCreate(TelemetryBase):
 
 
 class Telemetry(TelemetryBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     timestamp: datetime
-
-    class Config:
-        from_attributes = True
