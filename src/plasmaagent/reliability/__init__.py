@@ -23,6 +23,11 @@ from plasmaagent.reliability.degradation import (
     DegradationState,
     FallbackStrategy,
 )
+from plasmaagent.reliability.resilience import (
+    ResilienceManager,
+    ResilienceConfig,
+    ServiceHealth,
+)
 
 __all__ = [
     "CircuitBreaker",
@@ -42,4 +47,7 @@ __all__ = [
     "DegradationConfig",
     "DegradationState",
     "FallbackStrategy",
+    "ResilienceManager",
+    "ResilienceConfig",
+    "ServiceHealth",
 ]
