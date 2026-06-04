@@ -28,6 +28,15 @@ from plasmaagent.reliability.resilience import (
     ResilienceConfig,
     ServiceHealth,
 )
+from plasmaagent.reliability.disaster_recovery import (
+    DisasterRecoveryManager,
+    DisasterRecoveryConfig,
+    BackupMetadata,
+    BackupType,
+    RecoveryPlan,
+    RecoveryResult,
+    RecoveryStatus,
+)
 
 __all__ = [
     "CircuitBreaker",
@@ -50,4 +59,11 @@ __all__ = [
     "ResilienceManager",
     "ResilienceConfig",
     "ServiceHealth",
+    "DisasterRecoveryManager",
+    "DisasterRecoveryConfig",
+    "BackupMetadata",
+    "BackupType",
+    "RecoveryPlan",
+    "RecoveryResult",
+    "RecoveryStatus",
 ]
