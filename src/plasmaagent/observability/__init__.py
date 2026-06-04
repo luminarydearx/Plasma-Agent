@@ -9,6 +9,7 @@ from plasmaagent.observability.alert_models import (
 )
 from plasmaagent.observability.alert_service import AlertService
 from plasmaagent.observability.dashboard import TerminalDashboard
+from plasmaagent.observability.health import HealthChecker, HealthStatus
 from plasmaagent.observability.metrics_service import MetricsAggregationService
 from plasmaagent.observability.models import (
     ExecutionMetrics,
@@ -33,6 +34,8 @@ __all__ = [
     "AlertSeverity",
     "AlertStatus",
     "TerminalDashboard",
+    "HealthChecker",
+    "HealthStatus",
     "MetricsAggregationService",
     "ExecutionMetrics",
     "TaskMetrics",
