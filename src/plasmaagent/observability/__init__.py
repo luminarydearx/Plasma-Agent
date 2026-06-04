@@ -17,6 +17,11 @@ from plasmaagent.observability.models import (
     MetricsQuery,
     TimeRange,
 )
+from plasmaagent.observability.telegram_notifier import (
+    TelegramConfig,
+    TelegramMessage,
+    TelegramNotifier,
+)
 
 __all__ = [
     "AlertCondition",
@@ -34,4 +39,7 @@ __all__ = [
     "SystemMetrics",
     "MetricsQuery",
     "TimeRange",
+    "TelegramConfig",
+    "TelegramMessage",
+    "TelegramNotifier",
 ]
