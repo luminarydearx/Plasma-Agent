@@ -6,11 +6,11 @@
 
 | Metric | Value |
 |---|---|
-| **Latest Commit** | `cccf733` |
-| **Total Tests** | 607 |
+| **Latest Commit** | `0214599` |
+| **Total Tests** | 1288 |
 | **Test Status** | 100% PASS |
-| **Current Phase** | 3.6 Template Evolution |
-| **Overall Progress** | ~40% |
+| **Current Phase** | 4.4 Reliability Engineering |
+| **Overall Progress** | ~75% |
 
 ---
 
@@ -56,37 +56,71 @@
 - ReasoningService (38 unit tests) — orchestrates all components
 - 22 integration tests (end-to-end, stress, security, performance, regression)
 
----
+### Sub-Phase 3.6 - Template Evolution ✅
+- Template learner (extract patterns from successful tasks)
+- Template versioning with A/B testing
+- Template retirement (low success rate)
+- Auto-template generation from user patterns
+- 207 tests passing
 
-## In Progress
-
-### Sub-Phase 3.6 - Template Evolution 🔄
-**Goal:** Learn from user-created tasks and evolve templates automatically.
-
-**Scope:**
-1. Template learner (extract patterns from successful tasks)
-2. Template versioning
-3. A/B testing for templates
-4. Template retirement (low success rate)
-5. Auto-template generation from user patterns
-
-**Estimated:** ~5 hours | ~7 tasks
-
----
-
-## Upcoming Phases
-
-### Sub-Phase 3.7 - Smart Suggestions
+### Sub-Phase 3.7 - Smart Suggestions ✅
 - Next action recommendations
 - Similar task lookup
 - Anomaly detection
 - Performance optimization hints
+- 70 tests passing
 
-### Phase 4 - Production Hardening
-- **4.1 Scheduling** - Cron-like scheduler, one-time/recurring tasks
-- **4.2 Observability** - Real-time dashboard, alerts (webhook/Telegram)
-- **4.3 Security** - Auth, permissions, audit log, command sandboxing
-- **4.4 Reliability** - Graceful degradation, circuit breaker, disaster recovery
+### Sub-Phase 4.1 - Scheduling & Automation ✅
+- Cron expression parser (46 tests)
+- Background scheduler worker
+- One-time scheduled tasks
+- Recurring task patterns (hourly, daily, weekly, monthly)
+- Task dependencies & triggers
+- Scheduler persistence
+- CLI commands `plasma schedule`
+- 159 tests passing
+
+### Sub-Phase 4.2 - Observability & Monitoring ✅
+- Metrics aggregation service (81 tests)
+- Terminal dashboard (Rich Live, 20 tests)
+- Alert system with webhooks (27 tests)
+- Telegram bot notifications
+- Health monitoring endpoint
+- CLI commands `plasma monitor`, `plasma alerts`
+- 128 tests passing
+
+### Sub-Phase 4.3 - Security & Audit ✅
+- User authentication (bcrypt password hashing)
+- Role-based access control (admin, user, readonly)
+- Audit logging for all user actions
+- Permission service
+- Session management
+- Migration 011 (users, sessions, audit_logs tables)
+- CLI commands `plasma user`, `plasma audit`
+- 47 tests passing
+
+---
+
+## In Progress
+
+### Sub-Phase 4.4 - Reliability Engineering 🔄
+
+**Completed:**
+- ✅ Circuit Breaker (45 tests) — CLOSED/OPEN/HALF_OPEN states, thread-safe, async support
+- ✅ Exponential Backoff (50 tests) — 4 strategies (exponential/linear/constant/fibonacci), jitter, sync+async
+
+**Remaining:**
+- ⏳ Graceful degradation patterns
+- ⏳ Health checks integration
+- ⏳ Connection retry with backoff
+- ⏳ Disaster recovery procedures
+- ⏳ Comprehensive integration testing
+
+**Estimated:** ~4 hours remaining | ~4 tasks
+
+---
+
+## Upcoming Phases
 
 ### Phase 5 - Intelligence Expansion
 - **5.1 Memory System** - Short-term + long-term (pgvector embeddings)
@@ -98,53 +132,38 @@
 - **6.1 API Gateway** - REST (FastAPI), WebSocket, rate limiting
 - **6.2 Web Dashboard** - React/Svelte frontend
 - **6.3 Plugin System** - Hot-reload, sandboxing, marketplace
-- **6.4 Cloud LLM Integration** - OpenAI/Anthropic/Groq (optional)
-- **6.5 Distribution** - Installer (MSI/deb), auto-updater, docs
+- **6.4 Cloud LLM Integration** - OpenAI/Anthropic/Groq providers (optional)
+- **6.5 Documentation & Distribution** - Installers, auto-updater
 
 ---
 
-## Milestones
+## Test Coverage Summary
 
-| Milestone | Definition | ETA |
-|---|---|---|
-| **M1: Usable AI Agent** | Tahap A (Phase 3 Full) complete | Current |
-| **M2: Production AI Agent** | Tahap B (Phase 4) complete | After M1 |
-| **M3: Mature AI Agent** | Tahap C (Phase 5) complete | After M2 |
-| **M4: Complete Ecosystem** | Tahap D (Phase 6) complete | After M3 |
-
----
-
-## Project Conventions
-
-### Code Quality
-- **NO comments** (`#` or `"""`) - code must be self-documenting
-- **Single blank line** between code blocks (no double enters)
-- **Type hints** mandatory for all functions
-- **Pydantic V2** with `ConfigDict` (no deprecated `class Config`)
-- **psycopg3 async** with `dict_row` factory
-
-### Testing
-- **Hybrid approach:** Test at end of each sub-phase
-- **Edge cases mandatory:** Empty input, unicode, injection, concurrency
-- **Cross-phase regression:** Always test Phase 1, 2, 3 MVP don't break
-- **Stress tests:** 1000+ entries, concurrent ops, rapid succession
-
-### File Management
-- **Planning files** (SUBPHASE_X_Y_PLAN.md) created at start of sub-phase
-- **Planning files deleted** when sub-phase is 100% complete and tested
-- **ROADMAP.md** is permanent navigation source
-- **README.md** updated at each milestone
-
-### Architecture
-- **Database-centric:** All state in PostgreSQL (no filesystem)
-- **PTSM enforced:** Valid state transitions only
-- **Provider abstraction:** Rule-based now, LLM-ready later
-- **No local LLM storage:** Ollama etc. deferred until explicitly needed
+| Phase | Tests | Status |
+|-------|------:|--------|
+| Phase 1 Foundation | 11 | ✅ |
+| Phase 2 Execution | 45 | ✅ |
+| Phase 3 MVP Intelligence | 51 | ✅ |
+| Sub-Phase 3.4 Self-Improvement | 37 | ✅ |
+| Sub-Phase 3.5 Advanced Reasoning | 408 | ✅ |
+| Sub-Phase 3.6 Template Evolution | 207 | ✅ |
+| Sub-Phase 3.7 Smart Suggestions | 70 | ✅ |
+| Sub-Phase 4.1 Scheduling | 159 | ✅ |
+| Sub-Phase 4.2 Observability | 128 | ✅ |
+| Sub-Phase 4.3 Security | 47 | ✅ |
+| Sub-Phase 4.4 Reliability | 95 | 🔄 |
+| **TOTAL** | **~1288** | **✅** |
 
 ---
 
-## Current Focus: Sub-Phase 3.6
+## Recent Commits
 
-**Next Action:** Start Task 3.6.1 - Template Learner
-
-**Planning Doc:** `SUBPHASE_3_6_PLAN.md` (to be created at start)
+```
+0214599 fix(security,cli): fix migration down_revision and use shared run_async helper
+16962ec feat(cli): add user management CLI commands
+c2ae126 fix(security): fix auth service tests with proper async context manager mocking
+8430f73 feat(security): implement authentication, audit logging, and RBAC
+8a87b99 fix(observability): export health module in __init__.py
+23eada6 feat(observability): add Telegram notifications and health monitoring endpoints
+17611f7 fix(alerts): add --force flag and duplicate handling, cleanup planning docs
+```
