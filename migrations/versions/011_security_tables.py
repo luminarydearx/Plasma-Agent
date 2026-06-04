@@ -2,7 +2,7 @@ from uuid import uuid4
 from datetime import datetime
 
 revision = "011"
-down_revision = "010"
+down_revision = "010_add_alerts"
 branch_labels = None
 depends_on = None
 

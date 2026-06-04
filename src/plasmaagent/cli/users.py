@@ -4,9 +4,9 @@ from rich.console import Console
 from rich.table import Table
 from datetime import datetime
 from uuid import UUID
-import asyncio
 
 from plasmaagent.core.database import get_database
+from plasmaagent.core.asyncio_compat import run_async
 from plasmaagent.security.auth_service import AuthService, AuthenticationError
 from plasmaagent.security.audit_service import AuditService, AuditLogQuery
 from plasmaagent.security.models import UserCreate, UserRole, UserLogin
@@ -15,8 +15,6 @@ app = typer.Typer()
 console = Console()
 
 
-def run_async(coro):
-    return asyncio.run(coro)
 
 
 @app.command("create")
