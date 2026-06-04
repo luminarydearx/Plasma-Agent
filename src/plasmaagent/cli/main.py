@@ -113,12 +113,14 @@ def register_commands() -> None:
     from plasmaagent.cli import schedule
     from plasmaagent.cli import monitor
     from plasmaagent.cli import alerts
+    from plasmaagent.cli import users
 
     app.add_typer(tasks.app, name="task", help="Task management commands")
     app.add_typer(metrics.app, name="metrics", help="Template metrics and analytics")
     app.add_typer(schedule.app, name="schedule", help="Task scheduling commands")
     app.add_typer(monitor.monitor_app, name="monitor", help="Monitoring and observability commands")
     app.add_typer(alerts.alerts_app, name="alerts", help="Alert rules and notifications")
+    app.add_typer(users.app, name="user", help="User management and audit commands")
 
 
 register_commands()
@@ -126,7 +128,3 @@ register_commands()
 
 if __name__ == "__main__":
     app()
-
-
-
-
