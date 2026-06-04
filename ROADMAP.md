@@ -6,11 +6,11 @@
 
 | Metric | Value |
 |---|---|
-| **Latest Commit** | `0214599` |
-| **Total Tests** | 1288 |
+| **Latest Commit** | `0f9e717` |
+| **Total Reliability Tests** | 250 |
 | **Test Status** | 100% PASS |
-| **Current Phase** | 4.4 Reliability Engineering |
-| **Overall Progress** | ~75% |
+| **Current Phase** | Phase 5 - Intelligence Expansion |
+| **Overall Progress** | ~80% |
 
 ---
 
@@ -43,18 +43,18 @@
 - Execution metrics tracker
 - Template optimizer
 - CLI `plasma metrics show/analyze/optimize`
-- 37 comprehensive tests (cross-phase, stress, security, edge cases)
+- 37 comprehensive tests
 
 ### Sub-Phase 3.5 - Advanced Reasoning ✅
-- TaskDecomposer (54 unit tests) — pattern-based decomposition
-- ContextManager (84 unit tests) — session isolation, variable substitution
-- ErrorAnalyzer (62 unit tests) — error pattern matching, recovery suggestions
-- DependencyGraph (70 unit tests) — DAG with cycle detection, topological sort
-- ConditionalEvaluator (39 unit tests) — conditional step execution
-- ParallelExecutor (30 unit tests) — semaphore-based concurrency, fail-fast
-- RetryExecutor (31 unit tests) — exponential backoff with jitter
-- ReasoningService (38 unit tests) — orchestrates all components
-- 22 integration tests (end-to-end, stress, security, performance, regression)
+- TaskDecomposer (54 tests) — pattern-based decomposition
+- ContextManager (84 tests) — session isolation, variable substitution
+- ErrorAnalyzer (62 tests) — error pattern matching, recovery suggestions
+- DependencyGraph (70 tests) — DAG with cycle detection, topological sort
+- ConditionalEvaluator (39 tests) — conditional step execution
+- ParallelExecutor (30 tests) — semaphore-based concurrency, fail-fast
+- RetryExecutor (31 tests) — exponential backoff with jitter
+- ReasoningService (38 tests) — orchestrates all components
+- 22 integration tests
 
 ### Sub-Phase 3.6 - Template Evolution ✅
 - Template learner (extract patterns from successful tasks)
@@ -99,24 +99,14 @@
 - CLI commands `plasma user`, `plasma audit`
 - 47 tests passing
 
----
-
-## In Progress
-
-### Sub-Phase 4.4 - Reliability Engineering 🔄
-
-**Completed:**
-- ✅ Circuit Breaker (45 tests) — CLOSED/OPEN/HALF_OPEN states, thread-safe, async support
-- ✅ Exponential Backoff (50 tests) — 4 strategies (exponential/linear/constant/fibonacci), jitter, sync+async
-
-**Remaining:**
-- ⏳ Graceful degradation patterns
-- ⏳ Health checks integration
-- ⏳ Connection retry with backoff
-- ⏳ Disaster recovery procedures
-- ⏳ Comprehensive integration testing
-
-**Estimated:** ~4 hours remaining | ~4 tasks
+### Sub-Phase 4.4 - Reliability Engineering ✅
+- **Circuit Breaker** (45 tests) — CLOSED/OPEN/HALF_OPEN states, thread-safe, sync+async
+- **Exponential Backoff** (50 tests) — 4 strategies (exponential/linear/constant/fibonacci), jitter, sync+async
+- **Graceful Degradation** (51 tests) — 4 levels (FULL/PARTIAL/MINIMAL/NONE), auto-degrade/recover, 5 fallback strategies
+- **ResilienceManager** (48 tests) — unified health checks, auto-degrade on failure, execute_with_resilience
+- **Disaster Recovery** (40 tests) — backup management, recovery plans, auto-rollback, manifest export
+- **Integration Tests** (16 tests) — full stack, performance, security, regression
+- **250 total tests passing**
 
 ---
 
@@ -137,33 +127,25 @@
 
 ---
 
-## Test Coverage Summary
-
-| Phase | Tests | Status |
-|-------|------:|--------|
-| Phase 1 Foundation | 11 | ✅ |
-| Phase 2 Execution | 45 | ✅ |
-| Phase 3 MVP Intelligence | 51 | ✅ |
-| Sub-Phase 3.4 Self-Improvement | 37 | ✅ |
-| Sub-Phase 3.5 Advanced Reasoning | 408 | ✅ |
-| Sub-Phase 3.6 Template Evolution | 207 | ✅ |
-| Sub-Phase 3.7 Smart Suggestions | 70 | ✅ |
-| Sub-Phase 4.1 Scheduling | 159 | ✅ |
-| Sub-Phase 4.2 Observability | 128 | ✅ |
-| Sub-Phase 4.3 Security | 47 | ✅ |
-| Sub-Phase 4.4 Reliability | 95 | 🔄 |
-| **TOTAL** | **~1288** | **✅** |
-
----
-
 ## Recent Commits
 
 ```
+0f9e717 test(reliability): add comprehensive integration tests (Task 4.4.6)
+57e38a1 feat(reliability): add DisasterRecoveryManager (Task 4.4.5)
+98e7e4f feat(reliability): add ResilienceManager for unified health checks (Task 4.4.4)
+b7563ab feat(reliability): add graceful degradation service (Task 4.4.3)
+c14a0de feat(reliability): implement circuit breaker and backoff strategies
 0214599 fix(security,cli): fix migration down_revision and use shared run_async helper
-16962ec feat(cli): add user management CLI commands
-c2ae126 fix(security): fix auth service tests with proper async context manager mocking
-8430f73 feat(security): implement authentication, audit logging, and RBAC
-8a87b99 fix(observability): export health module in __init__.py
-23eada6 feat(observability): add Telegram notifications and health monitoring endpoints
-17611f7 fix(alerts): add --force flag and duplicate handling, cleanup planning docs
 ```
+
+---
+
+## Key Architecture Decisions
+
+1. **Database-first**: All state in PostgreSQL (no Redis, no filesystem state)
+2. **Async-first**: All I/O operations use async/await
+3. **Hybrid testing**: Unit tests + integration tests per sub-phase
+4. **Pluggable providers**: Rule-based now, LLM-ready architecture
+5. **Zero local LLM storage**: All intelligence via patterns or cloud APIs
+6. **Pydantic V2**: All models use frozen validation
+7. **Thread-safe**: All shared state protected with RLock
