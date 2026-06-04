@@ -11,6 +11,18 @@ from plasmaagent.reliability.backoff import (
     RetryResult,
     retry_with_backoff,
 )
+from plasmaagent.reliability.backoff import (
+    BackoffStrategy,
+    retry_with_backoff_sync,
+)
+from plasmaagent.reliability.degradation import (
+    GracefulDegradation,
+    DegradationLevel,
+    DegradationReason,
+    DegradationConfig,
+    DegradationState,
+    FallbackStrategy,
+)
 
 __all__ = [
     "CircuitBreaker",
@@ -19,7 +31,15 @@ __all__ = [
     "CircuitBreakerOpenError",
     "ExponentialBackoff",
     "BackoffConfig",
+    "BackoffStrategy",
     "RetryPolicy",
     "RetryResult",
     "retry_with_backoff",
+    "retry_with_backoff_sync",
+    "GracefulDegradation",
+    "DegradationLevel",
+    "DegradationReason",
+    "DegradationConfig",
+    "DegradationState",
+    "FallbackStrategy",
 ]
