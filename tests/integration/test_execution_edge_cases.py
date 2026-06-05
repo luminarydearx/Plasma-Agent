@@ -280,23 +280,6 @@ async def test_command_with_invalid_path(task_service, execution_service):
 
 
 @pytest.mark.asyncio
-async def test_zero_timeout(task_service, execution_service):
-    task = await task_service.create_task(
-        TaskCreate(
-            name="Zero Timeout",
-            payload=TaskPayload(
-                commands=["echo Quick"],
-                timeout=0,
-            ),
-        )
-    )
-    
-    result = await execution_service.execute_task(task.id)
-    
-    assert result.status in [TaskStatus.COMPLETED.value, TaskStatus.FAILED.value]
-
-
-@pytest.mark.asyncio
 async def test_very_short_timeout(task_service, execution_service):
     task = await task_service.create_task(
         TaskCreate(
@@ -492,3 +475,22 @@ async def test_very_many_steps(task_service, execution_service):
         assert step["step_order"] == i
         assert step["status"] == StepStatus.COMPLETED.value
         assert step["exit_code"] == 0
+
+
+@pytest.mark.asyncio
+async def test_zero_timeout_rejected(task_service):
+    from pydantic import ValidationError
+    
+    with pytest.raises(ValidationError) as exc_info:
+        await task_service.create_task(
+            TaskCreate(
+                name="Zero Timeout",
+                payload=TaskPayload(
+                    commands=["echo Quick"],
+                    timeout=0,
+                ),
+            )
+        )
+    
+    assert "timeout" in str(exc_info.value).lower()
+    assert "greater than or equal to 1" in str(exc_info.value).lower()
