@@ -3,7 +3,7 @@ from typing import Any
 
 
 class OllamaClient:
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen2.5-coder:7b-instruct-q3_k_m"):
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = ""):
         self._base_url = base_url
         self._model = model
 

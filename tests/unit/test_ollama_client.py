@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from plasmaagent.agent.ollama_client import OllamaClient, AgentOrchestrator
+from plasmaagent.agent.ollama_client import OllamaClient
+from plasmaagent.agent.orchestrator import AgentOrchestrator, AgentResponse
 
 
 class TestOllamaClient:
@@ -72,15 +73,60 @@ class TestOllamaClient:
 
 
 class TestAgentOrchestrator:
-    async def test_process_query(self):
+    async def test_process_query_returns_structure(self):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "message": {"role": "assistant", "content": "Agent response"}
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("plasmaagent.agent.orchestrator.httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client
+
+            mock_ollama = AsyncMock(spec=OllamaClient)
+            mock_ollama._model = "test-model"
+            mock_ollama._base_url = "http://localhost:11434"
+
+            orchestrator = AgentOrchestrator(ollama=mock_ollama)
+            result = await orchestrator.process_query("Hello agent")
+
+            assert result["response"] == "Agent response"
+            assert result["query"] == "Hello agent"
+            assert result["model"] == "test-model"
+
+    async def test_chat_returns_agent_response(self):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "message": {"role": "assistant", "content": "Hello!"}
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("plasmaagent.agent.orchestrator.httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            MockClient.return_value = mock_client
+
+            mock_ollama = AsyncMock(spec=OllamaClient)
+            mock_ollama._model = "test-model"
+            mock_ollama._base_url = "http://localhost:11434"
+
+            orchestrator = AgentOrchestrator(ollama=mock_ollama)
+            response = await orchestrator.chat("Hi there")
+
+            assert isinstance(response, AgentResponse)
+            assert response.text == "Hello!"
+            assert response.tool_calls == []
+            assert response.tool_results == []
+
+    async def test_reset_history_clears_messages(self):
         mock_ollama = AsyncMock(spec=OllamaClient)
-        mock_ollama.generate = AsyncMock(return_value="Agent response")
-        mock_ollama._model = "test-model"
-
         orchestrator = AgentOrchestrator(ollama=mock_ollama)
-        result = await orchestrator.process_query("Hello agent")
-
-        assert result["response"] == "Agent response"
-        assert result["query"] == "Hello agent"
-        assert result["model"] == "test-model"
-        mock_ollama.generate.assert_called_once()
+        orchestrator._history = [{"role": "user", "content": "test"}]
+        orchestrator.reset_history()
+        assert orchestrator._history == []
