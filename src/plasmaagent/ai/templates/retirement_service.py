@@ -1,8 +1,9 @@
-import time
 import json
+import time
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
-from psycopg.types.json import Json
+from uuid import uuid4
+
 from plasmaagent.core.database import Database
 from plasmaagent.ai.templates.retirement import (
     TemplateRetirement,
@@ -22,104 +23,111 @@ class RetirementService:
         if not data.reason.strip():
             raise ValueError("reason cannot be empty")
 
-        metadata_json = Json(data.metadata) if data.metadata is not None else None
+        new_id = str(uuid4())
+        metadata_json = json.dumps(data.metadata) if data.metadata is not None else None
+        now = datetime.now(timezone.utc)
 
-        async with self._db.transaction() as conn:
-            cursor = await conn.execute(
-                """
-                INSERT INTO template_retirements 
-                    (template_name, pattern, reason, success_rate, total_uses, 
-                     avg_execution_time_ms, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING id, template_name, pattern, reason, success_rate, 
-                          total_uses, avg_execution_time_ms, retired_at, metadata
-                """,
-                (
-                    data.template_name,
-                    data.pattern,
-                    data.reason,
-                    data.success_rate,
-                    data.total_uses,
-                    data.avg_execution_time_ms,
-                    metadata_json,
-                ),
-            )
-            row = await cursor.fetchone()
-            return self._row_to_retirement(row)
+        await self._db.execute(
+            """
+            INSERT INTO template_retirements 
+                (id, template_name, pattern, reason, success_rate, total_uses, 
+                 avg_execution_time_ms, metadata, retired_at)
+            VALUES (:id, :name, :pattern, :reason, :success, :uses, :time, :meta, :now)
+            """,
+            {
+                "id": new_id,
+                "name": data.template_name,
+                "pattern": data.pattern or "",
+                "reason": data.reason,
+                "success": data.success_rate or 0.0,
+                "uses": data.total_uses or 0,
+                "time": data.avg_execution_time_ms or 0,
+                "meta": metadata_json,
+                "now": now,
+            },
+        )
 
-    async def get_retirement(self, retirement_id: int) -> Optional[TemplateRetirement]:
-        async with self._db.connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT id, template_name, pattern, reason, success_rate,
-                       total_uses, avg_execution_time_ms, retired_at, metadata
-                FROM template_retirements
-                WHERE id = %s
-                """,
-                (retirement_id,),
-            )
-            row = await cursor.fetchone()
-            return self._row_to_retirement(row) if row else None
+        return TemplateRetirement(
+            id=new_id,
+            template_name=data.template_name,
+            pattern=data.pattern or "",
+            reason=data.reason,
+            success_rate=data.success_rate or 0.0,
+            total_uses=data.total_uses or 0,
+            avg_execution_time_ms=data.avg_execution_time_ms or 0,
+            retired_at=now,
+            metadata=data.metadata,
+        )
+
+    async def get_retirement(self, retirement_id: str) -> Optional[TemplateRetirement]:
+        row = await self._db.fetch_one(
+            """
+            SELECT id, template_name, pattern, reason, success_rate,
+                   total_uses, avg_execution_time_ms, retired_at, metadata
+            FROM template_retirements
+            WHERE id = :id
+            """,
+            {"id": retirement_id},
+        )
+        return self._row_to_retirement(row) if row else None
 
     async def list_retirements(
         self, limit: int = 50, offset: int = 0
     ) -> List[TemplateRetirement]:
-        async with self._db.connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT id, template_name, pattern, reason, success_rate,
-                       total_uses, avg_execution_time_ms, retired_at, metadata
-                FROM template_retirements
-                ORDER BY retired_at DESC
-                LIMIT %s OFFSET %s
-                """,
-                (limit, offset),
-            )
-            rows = await cursor.fetchall()
-            return [self._row_to_retirement(row) for row in rows]
+        rows = await self._db.fetch_all(
+            """
+            SELECT id, template_name, pattern, reason, success_rate,
+                   total_uses, avg_execution_time_ms, retired_at, metadata
+            FROM template_retirements
+            ORDER BY retired_at DESC
+            LIMIT :limit OFFSET :offset
+            """,
+            {"limit": limit, "offset": offset},
+        )
+        return [self._row_to_retirement(row) for row in rows]
 
     async def is_retired(self, template_name: str) -> bool:
-        async with self._db.connection() as conn:
-            cursor = await conn.execute(
-                "SELECT 1 FROM template_retirements WHERE template_name = %s LIMIT 1",
-                (template_name,),
-            )
-            return await cursor.fetchone() is not None
+        row = await self._db.fetch_one(
+            "SELECT 1 FROM template_retirements WHERE template_name = :name LIMIT 1",
+            {"name": template_name},
+        )
+        return row is not None
 
     async def find_retirement_candidates(
         self, request: RetirementScanRequest
     ) -> List[Dict[str, Any]]:
-        async with self._db.connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT 
-                    template_name,
-                    pattern,
-                    usage_count as total_uses,
-                    success_count as successes,
-                    failure_count as failures,
-                    CASE 
-                        WHEN usage_count > 0 
-                        THEN total_generation_time_ms::float / usage_count 
-                        ELSE 0.0 
-                    END as avg_time_ms,
-                    CASE 
-                        WHEN usage_count > 0 
-                        THEN success_count::float / usage_count 
-                        ELSE 0.0 
-                    END as success_rate
-                FROM template_metrics
-                WHERE created_at >= NOW() - make_interval(days => %s)
-                  AND usage_count >= %s
-                """,
-                (request.scan_period_days, request.min_uses_threshold),
-            )
-            rows = await cursor.fetchall()
+        rows = await self._db.fetch_all(
+            """
+            SELECT 
+                template_name,
+                pattern,
+                usage_count as total_uses,
+                success_count as successes,
+                failure_count as failures,
+                CASE 
+                    WHEN usage_count > 0 
+                    THEN CAST(total_generation_time_ms AS FLOAT) / usage_count 
+                    ELSE 0.0 
+                END as avg_time_ms,
+                CASE 
+                    WHEN usage_count > 0 
+                    THEN CAST(success_count AS FLOAT) / usage_count 
+                    ELSE 0.0 
+                END as success_rate
+            FROM template_metrics
+            WHERE created_at >= :cutoff
+              AND usage_count >= :min_uses
+            """,
+            {
+                "cutoff": time.time() - (request.scan_period_days * 86400),
+                "min_uses": request.min_uses_threshold,
+            },
+        )
 
         candidates = []
         for row in rows:
-            success_rate = float(row["success_rate"] or 0.0)
-            avg_time = float(row["avg_time_ms"] or 0.0)
+            success_rate = float(row.get("success_rate") or 0.0)
+            avg_time = float(row.get("avg_time_ms") or 0.0)
 
             if success_rate < request.success_rate_threshold:
                 reason = f"Low success rate: {success_rate:.2%}"
@@ -193,28 +201,34 @@ class RetirementService:
         )
 
     async def get_retirement_stats(self) -> Dict[str, Any]:
-        async with self._db.connection() as conn:
-            cursor = await conn.execute(
-                """
-                SELECT 
-                    COUNT(*) as total_retired,
-                    COUNT(DISTINCT template_name) as unique_templates,
-                    AVG(success_rate) as avg_success_rate_at_retirement,
-                    MIN(retired_at) as first_retirement,
-                    MAX(retired_at) as last_retirement
-                FROM template_retirements
-                """
-            )
-            row = await cursor.fetchone()
+        row = await self._db.fetch_one(
+            """
+            SELECT 
+                COUNT(*) as total_retired,
+                COUNT(DISTINCT template_name) as unique_templates,
+                AVG(success_rate) as avg_success_rate_at_retirement,
+                MIN(retired_at) as first_retirement,
+                MAX(retired_at) as last_retirement
+            FROM template_retirements
+            """
+        )
+        if not row:
             return {
-                "total_retired": row["total_retired"] or 0,
-                "unique_templates": row["unique_templates"] or 0,
-                "avg_success_rate_at_retirement": float(
-                    row["avg_success_rate_at_retirement"] or 0.0
-                ),
-                "first_retirement": row["first_retirement"],
-                "last_retirement": row["last_retirement"],
+                "total_retired": 0,
+                "unique_templates": 0,
+                "avg_success_rate_at_retirement": 0.0,
+                "first_retirement": None,
+                "last_retirement": None,
             }
+        return {
+            "total_retired": row.get("total_retired") or 0,
+            "unique_templates": row.get("unique_templates") or 0,
+            "avg_success_rate_at_retirement": float(
+                row.get("avg_success_rate_at_retirement") or 0.0
+            ),
+            "first_retirement": row.get("first_retirement"),
+            "last_retirement": row.get("last_retirement"),
+        }
 
     def _build_candidate(
         self,
@@ -224,27 +238,30 @@ class RetirementService:
         reason: str,
     ) -> Dict[str, Any]:
         return {
-            "template_name": row["template_name"],
-            "pattern": row.get("pattern"),
-            "total_uses": row["total_uses"],
-            "successes": row["successes"],
+            "template_name": row.get("template_name", ""),
+            "pattern": row.get("pattern", ""),
+            "total_uses": row.get("total_uses", 0),
+            "successes": row.get("successes", 0),
             "success_rate": success_rate,
             "avg_execution_time_ms": avg_time,
             "retirement_reason": reason,
         }
 
-    def _row_to_retirement(self, row) -> TemplateRetirement:
-        metadata = row["metadata"]
+    def _row_to_retirement(self, row: Dict[str, Any]) -> TemplateRetirement:
+        metadata = row.get("metadata")
         if isinstance(metadata, str):
-            metadata = json.loads(metadata)
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = None
         return TemplateRetirement(
             id=row["id"],
             template_name=row["template_name"],
-            pattern=row["pattern"],
+            pattern=row.get("pattern", ""),
             reason=row["reason"],
-            success_rate=row["success_rate"],
-            total_uses=row["total_uses"],
-            avg_execution_time_ms=row["avg_execution_time_ms"],
-            retired_at=row["retired_at"],
+            success_rate=row.get("success_rate", 0.0),
+            total_uses=row.get("total_uses", 0),
+            avg_execution_time_ms=row.get("avg_execution_time_ms", 0),
+            retired_at=row.get("retired_at"),
             metadata=metadata,
         )

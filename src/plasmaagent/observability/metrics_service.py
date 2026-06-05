@@ -104,7 +104,7 @@ class MetricsAggregationService:
 
             task_name = task.name
 
-            stmt = select(TemplateMetric).where(TemplateMetric.template_id == task_name).limit(1)
+            stmt = select(TemplateMetric).where(TemplateMetric.template_name == task_name).limit(1)
             result = await session.execute(stmt)
             template_metric = result.scalar_one_or_none()
             template_name = task_name if template_metric else None
@@ -168,7 +168,7 @@ class MetricsAggregationService:
                 "cancelled": int(row.cancelled or 0),
             }
 
-            stmt = select(func.count(func.distinct(TemplateMetric.template_id)))
+            stmt = select(func.count(func.distinct(TemplateMetric.template_name)))
             result = await session.execute(stmt)
             unique_templates = result.scalar() or 0
 
@@ -205,14 +205,14 @@ class MetricsAggregationService:
         async with self._db.session() as session:
             stmt = (
                 select(
-                    TemplateMetric.template_id,
+                    TemplateMetric.template_name,
                     func.count(TemplateMetric.id).label("usage_count"),
-                    func.sum(case((TemplateMetric.success == 1, 1), else_=0)).label("success_count"),
-                    func.sum(case((TemplateMetric.success == 0, 1), else_=0)).label("failure_count"),
-                    func.avg(TemplateMetric.execution_time_ms).label("avg_confidence"),
+                    func.sum(case((TemplateMetric.success_count > 0, 1), else_=0)).label("success_count"),
+                    func.sum(TemplateMetric.failure_count).label("failure_count"),
+                    func.avg(TemplateMetric.avg_confidence).label("avg_confidence"),
                 )
-                .where(TemplateMetric.execution_time_ms > 0)
-                .group_by(TemplateMetric.template_id)
+                .where(TemplateMetric.usage_count > 0)
+                .group_by(TemplateMetric.template_name)
                 .order_by(func.count(TemplateMetric.id).desc())
                 .limit(limit)
             )
@@ -221,7 +221,7 @@ class MetricsAggregationService:
 
             return [
                 {
-                    "template_name": str(row.template_id),
+                    "template_name": str(row.template_name),
                     "usage_count": int(row.usage_count),
                     "success_count": int(row.success_count or 0),
                     "failure_count": int(row.failure_count or 0),

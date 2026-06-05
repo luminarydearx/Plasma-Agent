@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import httpx
-from psycopg.errors import UniqueViolation
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from plasmaagent.observability.alert_models import (
     AlertCondition,
@@ -34,114 +35,106 @@ class AlertService:
 
     async def create_rule(self, rule_data: AlertRuleCreate) -> AlertRule:
         new_id = uuid4()
-        async with self._db.transaction() as conn:
-            async with conn.cursor() as cur:
-                try:
-                    await cur.execute(
-                        """INSERT INTO alert_rules
-                           (id, name, description, metric_name, condition, threshold, severity,
-                            webhook_url, enabled, cooldown_seconds, status)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                           RETURNING created_at, updated_at""",
-                        (
-                            new_id,
-                            rule_data.name,
-                            rule_data.description,
-                            rule_data.metric_name,
-                            rule_data.condition.value,
-                            rule_data.threshold,
-                            rule_data.severity.value,
-                            rule_data.webhook_url,
-                            rule_data.enabled,
-                            rule_data.cooldown_seconds,
-                            AlertStatus.ACTIVE.value,
-                        ),
-                    )
-                except UniqueViolation:
-                    raise DuplicateAlertRuleError(rule_data.name)
+        now = datetime.now(timezone.utc)
+        
+        try:
+            await self._db.execute(
+                """INSERT INTO alert_rules
+                   (id, name, description, metric_name, condition, threshold, severity,
+                    webhook_url, enabled, cooldown_seconds, status, created_at, updated_at)
+                   VALUES (:id, :name, :desc, :metric, :cond, :thresh, :sev,
+                           :webhook, :enabled, :cooldown, :status, :created, :updated)""",
+                {
+                    "id": str(new_id),
+                    "name": rule_data.name,
+                    "desc": rule_data.description,
+                    "metric": rule_data.metric_name,
+                    "cond": rule_data.condition.value,
+                    "thresh": rule_data.threshold,
+                    "sev": rule_data.severity.value,
+                    "webhook": rule_data.webhook_url,
+                    "enabled": 1 if rule_data.enabled else 0,
+                    "cooldown": rule_data.cooldown_seconds,
+                    "status": AlertStatus.ACTIVE.value,
+                    "created": now,
+                    "updated": now,
+                },
+            )
+        except IntegrityError:
+            raise DuplicateAlertRuleError(rule_data.name)
 
-                row = await cur.fetchone()
-                if row is None:
-                    raise RuntimeError("Failed to create alert rule")
-
-                return AlertRule(
-                    id=new_id,
-                    name=rule_data.name,
-                    description=rule_data.description,
-                    metric_name=rule_data.metric_name,
-                    condition=rule_data.condition,
-                    threshold=rule_data.threshold,
-                    severity=rule_data.severity,
-                    webhook_url=rule_data.webhook_url,
-                    enabled=rule_data.enabled,
-                    cooldown_seconds=rule_data.cooldown_seconds,
-                    status=AlertStatus.ACTIVE,
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
+        return AlertRule(
+            id=new_id,
+            name=rule_data.name,
+            description=rule_data.description,
+            metric_name=rule_data.metric_name,
+            condition=rule_data.condition,
+            threshold=rule_data.threshold,
+            severity=rule_data.severity,
+            webhook_url=rule_data.webhook_url,
+            enabled=rule_data.enabled,
+            cooldown_seconds=rule_data.cooldown_seconds,
+            status=AlertStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
 
     async def get_rule(self, rule_id: UUID) -> AlertRule | None:
-        async with self._db.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """SELECT id, name, description, metric_name, condition, threshold,
-                              severity, webhook_url, enabled, cooldown_seconds, status,
-                              last_triggered_at, created_at, updated_at
-                       FROM alert_rules WHERE id = %s""",
-                    (rule_id,),
-                )
-                row = await cur.fetchone()
-                if row is None:
-                    return None
+        row = await self._db.fetch_one(
+            """SELECT id, name, description, metric_name, condition, threshold,
+                      severity, webhook_url, enabled, cooldown_seconds, status,
+                      last_triggered_at, created_at, updated_at
+               FROM alert_rules WHERE id = :id""",
+            {"id": str(rule_id)},
+        )
+        if row is None:
+            return None
 
-                return AlertRule(
-                    id=row["id"],
-                    name=row["name"],
-                    description=row["description"],
-                    metric_name=row["metric_name"],
-                    condition=AlertCondition(row["condition"]),
-                    threshold=row["threshold"],
-                    severity=AlertSeverity(row["severity"]),
-                    webhook_url=row["webhook_url"],
-                    enabled=row["enabled"],
-                    cooldown_seconds=row["cooldown_seconds"],
-                    status=AlertStatus(row["status"]),
-                    last_triggered_at=row["last_triggered_at"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
+        return AlertRule(
+            id=UUID(row["id"]),
+            name=row["name"],
+            description=row["description"],
+            metric_name=row["metric_name"],
+            condition=AlertCondition(row["condition"]),
+            threshold=row["threshold"],
+            severity=AlertSeverity(row["severity"]),
+            webhook_url=row["webhook_url"],
+            enabled=bool(row["enabled"]),
+            cooldown_seconds=row["cooldown_seconds"],
+            status=AlertStatus(row["status"]),
+            last_triggered_at=row.get("last_triggered_at"),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
 
     async def list_rules(self, limit: int = 100, offset: int = 0) -> list[AlertRule]:
-        async with self._db.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """SELECT id, name, description, metric_name, condition, threshold,
-                              severity, webhook_url, enabled, cooldown_seconds, status,
-                              last_triggered_at, created_at, updated_at
-                       FROM alert_rules ORDER BY created_at DESC LIMIT %s OFFSET %s""",
-                    (limit, offset),
-                )
-                rows = await cur.fetchall()
+        rows = await self._db.fetch_all(
+            """SELECT id, name, description, metric_name, condition, threshold,
+                      severity, webhook_url, enabled, cooldown_seconds, status,
+                      last_triggered_at, created_at, updated_at
+               FROM alert_rules ORDER BY created_at DESC LIMIT :limit OFFSET :offset""",
+            {"limit": limit, "offset": offset},
+        )
 
-                return [
-                    AlertRule(
-                        id=row["id"],
-                        name=row["name"],
-                        description=row["description"],
-                        metric_name=row["metric_name"],
-                        condition=AlertCondition(row["condition"]),
-                        threshold=row["threshold"],
-                        severity=AlertSeverity(row["severity"]),
-                        webhook_url=row["webhook_url"],
-                        enabled=row["enabled"],
-                        cooldown_seconds=row["cooldown_seconds"],
-                        status=AlertStatus(row["status"]),
-                        last_triggered_at=row["last_triggered_at"],
-                        created_at=row["created_at"],
-                        updated_at=row["updated_at"],
-                    )
-                    for row in rows
-                ]
+        return [
+            AlertRule(
+                id=UUID(row["id"]),
+                name=row["name"],
+                description=row["description"],
+                metric_name=row["metric_name"],
+                condition=AlertCondition(row["condition"]),
+                threshold=row["threshold"],
+                severity=AlertSeverity(row["severity"]),
+                webhook_url=row["webhook_url"],
+                enabled=bool(row["enabled"]),
+                cooldown_seconds=row["cooldown_seconds"],
+                status=AlertStatus(row["status"]),
+                last_triggered_at=row.get("last_triggered_at"),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
 
     async def update_rule(self, rule_id: UUID, update: AlertRuleUpdate) -> AlertRule | None:
         existing = await self.get_rule(rule_id)
@@ -149,56 +142,58 @@ class AlertService:
             return None
 
         updates = []
-        values = []
+        params: dict[str, Any] = {"id": str(rule_id)}
+        
         if update.name is not None:
-            updates.append("name = %s")
-            values.append(update.name)
+            updates.append("name = :name")
+            params["name"] = update.name
         if update.description is not None:
-            updates.append("description = %s")
-            values.append(update.description)
+            updates.append("description = :desc")
+            params["desc"] = update.description
         if update.threshold is not None:
-            updates.append("threshold = %s")
-            values.append(update.threshold)
+            updates.append("threshold = :thresh")
+            params["thresh"] = update.threshold
         if update.severity is not None:
-            updates.append("severity = %s")
-            values.append(update.severity.value)
+            updates.append("severity = :sev")
+            params["sev"] = update.severity.value
         if update.webhook_url is not None:
-            updates.append("webhook_url = %s")
-            values.append(update.webhook_url)
+            updates.append("webhook_url = :webhook")
+            params["webhook"] = update.webhook_url
         if update.enabled is not None:
-            updates.append("enabled = %s")
-            values.append(update.enabled)
+            updates.append("enabled = :enabled")
+            params["enabled"] = 1 if update.enabled else 0
         if update.cooldown_seconds is not None:
-            updates.append("cooldown_seconds = %s")
-            values.append(update.cooldown_seconds)
+            updates.append("cooldown_seconds = :cooldown")
+            params["cooldown"] = update.cooldown_seconds
 
         if not updates:
             return existing
 
-        updates.append("updated_at = %s")
-        values.append(datetime.now(timezone.utc))
-        values.append(rule_id)
+        updates.append("updated_at = :updated")
+        params["updated"] = datetime.now(timezone.utc)
 
-        async with self._db.transaction() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"UPDATE alert_rules SET {', '.join(updates)} WHERE id = %s",
-                    values,
-                )
+        await self._db.execute(
+            f"UPDATE alert_rules SET {', '.join(updates)} WHERE id = :id",
+            params,
+        )
 
         return await self.get_rule(rule_id)
 
     async def delete_rule(self, rule_id: UUID) -> bool:
         async with self._db.transaction() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("DELETE FROM alert_rules WHERE id = %s", (rule_id,))
-                return cur.rowcount > 0
+            result = await conn.execute(
+                text("DELETE FROM alert_rules WHERE id = :id"),
+                {"id": str(rule_id)},
+            )
+            return result.rowcount > 0
 
     async def delete_rule_by_name(self, name: str) -> bool:
         async with self._db.transaction() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("DELETE FROM alert_rules WHERE name = %s", (name,))
-                return cur.rowcount > 0
+            result = await conn.execute(
+                text("DELETE FROM alert_rules WHERE name = :name"),
+                {"name": name},
+            )
+            return result.rowcount > 0
 
     async def evaluate_condition(self, condition: AlertCondition, value: float, threshold: float) -> bool:
         if condition == AlertCondition.EQUALS:
@@ -286,66 +281,67 @@ class AlertService:
             webhook_response=webhook_response,
         )
 
-        async with self._db.transaction() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """INSERT INTO alert_events
-                       (id, rule_id, rule_name, severity, metric_name, metric_value,
-                        threshold, condition, message, webhook_url, webhook_status,
-                        webhook_response, triggered_at)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                    (
-                        event.id,
-                        event.rule_id,
-                        event.rule_name,
-                        event.severity.value,
-                        event.metric_name,
-                        event.metric_value,
-                        event.threshold,
-                        event.condition.value,
-                        event.message,
-                        event.webhook_url,
-                        event.webhook_status,
-                        event.webhook_response,
-                        event.triggered_at,
-                    ),
-                )
+        await self._db.execute(
+            """INSERT INTO alert_events
+               (id, rule_id, rule_name, severity, metric_name, metric_value,
+                threshold, condition, message, webhook_url, webhook_status,
+                webhook_response, triggered_at)
+               VALUES (:id, :rule_id, :rule_name, :sev, :metric, :value,
+                       :thresh, :cond, :msg, :webhook, :wstatus,
+                       :wresponse, :triggered)""",
+            {
+                "id": str(event.id),
+                "rule_id": str(event.rule_id),
+                "rule_name": event.rule_name,
+                "sev": event.severity.value,
+                "metric": event.metric_name,
+                "value": event.metric_value,
+                "thresh": event.threshold,
+                "cond": event.condition.value,
+                "msg": event.message,
+                "webhook": event.webhook_url,
+                "wstatus": event.webhook_status,
+                "wresponse": event.webhook_response,
+                "triggered": event.triggered_at,
+            },
+        )
 
-                await cur.execute(
-                    "UPDATE alert_rules SET last_triggered_at = %s, status = %s WHERE id = %s",
-                    (datetime.now(timezone.utc), AlertStatus.TRIGGERED.value, rule.id),
-                )
+        await self._db.execute(
+            "UPDATE alert_rules SET last_triggered_at = :triggered, status = :status WHERE id = :id",
+            {
+                "triggered": datetime.now(timezone.utc),
+                "status": AlertStatus.TRIGGERED.value,
+                "id": str(rule.id),
+            },
+        )
 
         return event
 
     async def get_recent_events(self, limit: int = 50) -> list[AlertEvent]:
-        async with self._db.connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """SELECT id, rule_id, rule_name, severity, metric_name, metric_value,
-                              threshold, condition, message, webhook_url, webhook_status,
-                              webhook_response, triggered_at, resolved_at
-                       FROM alert_events ORDER BY triggered_at DESC LIMIT %s""",
-                    (limit,),
-                )
-                rows = await cur.fetchall()
+        rows = await self._db.fetch_all(
+            """SELECT id, rule_id, rule_name, severity, metric_name, metric_value,
+                      threshold, condition, message, webhook_url, webhook_status,
+                      webhook_response, triggered_at, resolved_at
+               FROM alert_events ORDER BY triggered_at DESC LIMIT :limit""",
+            {"limit": limit},
+        )
 
-                return [
-                    AlertEvent(
-                        id=row["id"],
-                        rule_id=row["rule_id"],
-                        rule_name=row["rule_name"],
-                        severity=AlertSeverity(row["severity"]),
-                        metric_name=row["metric_name"],
-                        metric_value=row["metric_value"],
-                        threshold=row["threshold"],
-                        condition=AlertCondition(row["condition"]),
-                        message=row["message"],
-                        webhook_url=row["webhook_url"],
-                        webhook_status=row["webhook_status"],
-                        webhook_response=row["webhook_response"],
-                        triggered_at=row["triggered_at"],
-                        resolved_at=row["resolved_at"],
-                    )
-                    for row in rows
-                ]
+        return [
+            AlertEvent(
+                id=UUID(row["id"]),
+                rule_id=UUID(row["rule_id"]),
+                rule_name=row["rule_name"],
+                severity=AlertSeverity(row["severity"]),
+                metric_name=row["metric_name"],
+                metric_value=row["metric_value"],
+                threshold=row["threshold"],
+                condition=AlertCondition(row["condition"]),
+                message=row["message"],
+                webhook_url=row["webhook_url"],
+                webhook_status=row["webhook_status"],
+                webhook_response=row.get("webhook_response"),
+                triggered_at=row["triggered_at"],
+                resolved_at=row.get("resolved_at"),
+            )
+            for row in rows
+        ]

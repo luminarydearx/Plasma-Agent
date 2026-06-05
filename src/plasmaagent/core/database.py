@@ -21,6 +21,7 @@ class Database:
         self._session_maker: Optional[async_sessionmaker[AsyncSession]] = None
         self._settings = get_settings()
         self._db_path = db_path or self._settings.database_path
+        self._initialized = False
 
     async def connect(self) -> None:
         if self._engine is not None:
@@ -44,8 +45,19 @@ class Database:
                 class_=AsyncSession,
                 expire_on_commit=False,
             )
+            
+            if not self._initialized:
+                await self._init_schema()
+                self._initialized = True
         except Exception as e:
             raise ConnectionError(f"Failed to connect to database: {e}") from e
+
+    async def _init_schema(self) -> None:
+        from plasmaagent.core.schema import SCHEMA_STATEMENTS
+        
+        async with self._engine.begin() as conn:
+            for statement in SCHEMA_STATEMENTS:
+                await conn.execute(text(statement))
 
     async def disconnect(self) -> None:
         if self._engine is not None:

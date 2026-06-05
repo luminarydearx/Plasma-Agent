@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections import Counter, defaultdict
 from typing import Any
-
-from psycopg.rows import dict_row
+from uuid import uuid4
 
 from plasmaagent.ai.templates.models import (
     LearnedTemplate,
@@ -52,25 +52,37 @@ class TemplateLearner:
         )
 
     async def _fetch_successful_tasks(self, limit: int) -> list[dict[str, Any]]:
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cursor:
-                await cursor.execute(
-                    """
-                    SELECT t.id, t.name, t.description, t.payload,
-                           COUNT(ts.id) as step_count
-                    FROM tasks t
-                    LEFT JOIN task_steps ts ON t.id = ts.task_id
-                    WHERE t.status = 'COMPLETED'
-                      AND t.payload IS NOT NULL
-                    GROUP BY t.id, t.name, t.description, t.payload
-                    HAVING COUNT(ts.id) > 0
-                    ORDER BY t.created_at DESC
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
-                rows = await cursor.fetchall()
-                return list(rows) if rows else []
+        rows = await self._db.fetch_all(
+            """
+            SELECT t.id, t.name, t.description, t.payload,
+                   COUNT(ts.id) as step_count
+            FROM tasks t
+            LEFT JOIN task_steps ts ON t.id = ts.task_id
+            WHERE t.status = 'COMPLETED'
+              AND t.payload IS NOT NULL
+            GROUP BY t.id, t.name, t.description, t.payload
+            HAVING COUNT(ts.id) > 0
+            ORDER BY t.created_at DESC
+            LIMIT :limit
+            """,
+            {"limit": limit},
+        )
+        result = []
+        for row in rows:
+            payload = row.get("payload")
+            if payload and isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except json.JSONDecodeError:
+                    payload = None
+            result.append({
+                "id": row["id"],
+                "name": row["name"],
+                "description": row.get("description"),
+                "payload": payload,
+                "step_count": row.get("step_count", 0),
+            })
+        return result
 
     def _group_by_commands(
         self, tasks: list[dict[str, Any]]
@@ -82,7 +94,7 @@ class TemplateLearner:
             if not payload:
                 continue
 
-            commands = payload.get("commands", [])
+            commands = payload.get("commands", []) if isinstance(payload, dict) else []
             if not commands:
                 continue
 
@@ -175,54 +187,58 @@ class TemplateLearner:
         new_count = 0
         updated_count = 0
 
-        async with self._db.transaction() as conn:
-            async with conn.cursor(row_factory=dict_row) as cursor:
-                for candidate in candidates:
-                    await cursor.execute(
-                        """
-                        SELECT id FROM template_metrics
-                        WHERE template_name = %s AND pattern = %s
-                        """,
-                        (candidate.pattern_name, candidate.commands[0] if candidate.commands else ""),
-                    )
-                    existing = await cursor.fetchone()
+        for candidate in candidates:
+            existing = await self._db.fetch_one(
+                """
+                SELECT id FROM template_metrics
+                WHERE template_name = :name AND pattern = :pattern
+                """,
+                {
+                    "name": candidate.pattern_name,
+                    "pattern": candidate.commands[0] if candidate.commands else "",
+                },
+            )
 
-                    if existing:
-                        await cursor.execute(
-                            """
-                            UPDATE template_metrics
-                            SET usage_count = usage_count + %s,
-                                success_count = success_count + %s,
-                                avg_confidence = %s,
-                                updated_at = NOW()
-                            WHERE id = %s
-                            """,
-                            (
-                                candidate.frequency,
-                                int(candidate.frequency * candidate.success_rate),
-                                candidate.confidence,
-                                existing["id"],
-                            ),
-                        )
-                        updated_count += 1
-                    else:
-                        await cursor.execute(
-                            """
-                            INSERT INTO template_metrics
-                                (template_name, pattern, usage_count, success_count,
-                                 failure_count, avg_confidence, created_at, updated_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
-                            """,
-                            (
-                                candidate.pattern_name,
-                                candidate.commands[0] if candidate.commands else "",
-                                candidate.frequency,
-                                int(candidate.frequency * candidate.success_rate),
-                                0,
-                                candidate.confidence,
-                            ),
-                        )
-                        new_count += 1
+            if existing:
+                await self._db.execute(
+                    """
+                    UPDATE template_metrics
+                    SET usage_count = usage_count + :freq,
+                        success_count = success_count + :success,
+                        avg_confidence = :conf,
+                        updated_at = :now
+                    WHERE id = :id
+                    """,
+                    {
+                        "freq": candidate.frequency,
+                        "success": int(candidate.frequency * candidate.success_rate),
+                        "conf": candidate.confidence,
+                        "now": time.time(),
+                        "id": existing["id"],
+                    },
+                )
+                updated_count += 1
+            else:
+                new_id = str(uuid4())
+                await self._db.execute(
+                    """
+                    INSERT INTO template_metrics
+                        (id, template_name, pattern, usage_count, success_count,
+                         failure_count, avg_confidence, created_at, updated_at)
+                    VALUES (:id, :name, :pattern, :usage, :success, :failure, :conf, :now, :now)
+                    """,
+                    {
+                        "id": new_id,
+                        "name": candidate.pattern_name,
+                        "pattern": candidate.commands[0] if candidate.commands else "",
+                        "usage": candidate.frequency,
+                        "success": int(candidate.frequency * candidate.success_rate),
+                        "failure": 0,
+                        "conf": candidate.confidence,
+                        "now": time.time(),
+                    },
+                )
+                new_count += 1
 
         return new_count, updated_count
 
