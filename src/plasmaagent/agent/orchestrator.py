@@ -252,9 +252,24 @@ class AgentOrchestrator:
         self._system_prompt = system_prompt or _build_system_prompt()
         self._max_iterations = max_tool_iterations
         self._history: list[dict[str, Any]] = []
+        self._tools = TOOL_REGISTRY
+        self._permission_manager = None
 
     def reset_history(self) -> None:
         self._history.clear()
+
+    async def execute_tool(self, name: str, args: dict[str, Any]) -> str:
+        tool_def = self._tools.get(name)
+        if tool_def is None:
+            return f"✗ Unknown tool: {name}"
+        try:
+            result = await tool_def.handler(**args)
+            if result.success:
+                return f"✓ {result.output}"
+            else:
+                return f"✗ {result.output}"
+        except Exception as e:
+            return f"✗ Tool error: {type(e).__name__}: {e}"
 
     async def chat(self, user_message: str) -> AgentResponse:
         self._history.append({"role": "user", "content": user_message})

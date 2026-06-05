@@ -449,10 +449,16 @@ async def clipboard_get() -> ToolResult:
                 ["powershell", "-Command", "Get-Clipboard"],
                 capture_output=True, text=True, timeout=5,
             )
-            return ToolResult(True, result.stdout.strip(), {"content": result.stdout.strip()})
+            content = (result.stdout or "").strip()
+            if not content:
+                return ToolResult(True, "(clipboard is empty)", {"content": ""})
+            return ToolResult(True, content, {"content": content})
         else:
             result = subprocess.run(["xclip", "-selection", "clipboard", "-o"], capture_output=True, text=True, timeout=5)
-            return ToolResult(True, result.stdout.strip(), {"content": result.stdout.strip()})
+            content = (result.stdout or "").strip()
+            if not content:
+                return ToolResult(True, "(clipboard is empty)", {"content": ""})
+            return ToolResult(True, content, {"content": content})
     except Exception as e:
         return ToolResult(False, f"Clipboard read failed: {e}")
 

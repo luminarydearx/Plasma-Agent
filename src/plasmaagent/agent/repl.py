@@ -150,26 +150,27 @@ async def _handle_model_command(
 
 
 async def _handle_perms_command(query: str, orchestrator: "AgentOrchestrator") -> None:
-    pm = orchestrator._permission_manager
+    from plasmaagent.agent.permission_manager import list_permissions
+    
     parts = query.strip().split()
 
     if len(parts) >= 2 and parts[1].lower() == "reset":
-        pm.reset_all()
+        from plasmaagent.agent.permission_manager import reset_permissions
+        reset_permissions()
         console.print("[green]All permissions reset.[/green]")
         return
 
-    perms = pm.get_all_permissions()
-    if not perms:
+    perms = list_permissions()
+    tool_perms = perms.get("tools", {})
+    if not tool_perms:
         console.print("[dim]No saved permissions yet.[/dim]")
         return
 
     table = Table(title="Saved Permissions", show_header=True)
     table.add_column("Tool", style="cyan")
     table.add_column("Decision", style="green")
-    table.add_column("Count", justify="right")
-    for tool, decision in sorted(perms.items()):
-        count = pm.get_tool_count(tool)
-        table.add_row(tool, decision.value, str(count))
+    for tool, decision in sorted(tool_perms.items()):
+        table.add_row(tool, decision)
     console.print(table)
 
 
@@ -253,15 +254,17 @@ async def _chat_loop(orchestrator: "AgentOrchestrator", username: str, base_url:
 
         if response.tool_calls:
             for tc in response.tool_calls:
-                result = await orchestrator.execute_tool(tc.name, tc.arguments)
-                _render_tool_call(tc.name, tc.arguments, result)
+                tool_name = tc.get("name") or tc.get("function", {}).get("name", "unknown")
+                tool_args = tc.get("args") or tc.get("function", {}).get("arguments", {})
+                result = await orchestrator.execute_tool(tool_name, tool_args)
+                _render_tool_call(tool_name, tool_args, result)
             console.print()
 
-        if response.content:
+        if response.text:
             try:
-                console.print(Markdown(response.content))
+                console.print(Markdown(response.text))
             except Exception:
-                console.print(response.content)
+                console.print(response.text)
 
         console.print(f"[dim]⏱ {elapsed:.1f}s[/dim]")
 
@@ -285,10 +288,12 @@ def _chat_loop_fallback(orchestrator: "AgentOrchestrator") -> None:
             response = await orchestrator.chat(user_input)
             if response.tool_calls:
                 for tc in response.tool_calls:
-                    result = await orchestrator.execute_tool(tc.name, tc.arguments)
-                    _render_tool_call(tc.name, tc.arguments, result)
-            if response.content:
-                console.print(response.content)
+                    tool_name = tc.get("name") or tc.get("function", {}).get("name", "unknown")
+                    tool_args = tc.get("args") or tc.get("function", {}).get("arguments", {})
+                    result = await orchestrator.execute_tool(tool_name, tool_args)
+                    _render_tool_call(tool_name, tool_args, result)
+            if response.text:
+                console.print(response.text)
 
         asyncio.run(run())
 
@@ -340,10 +345,13 @@ def start_chat(model: str = "qwen2.5-coder:7b-instruct", base_url: str = "http:/
         except Exception:
             pass
 
-        print_banner(selected_model, base_url, username, len(ollama._tools) if hasattr(ollama, "_tools") else 11)
+        print_banner(selected_model, base_url, username, len(TOOL_REGISTRY))
 
         orchestrator = AgentOrchestrator(ollama=ollama)
         await _chat_loop(orchestrator, username, base_url)
 
     from plasmaagent.core.asyncio_compat import run_async
     run_async(main())
+
+
+from plasmaagent.agent.tools import TOOL_REGISTRY
