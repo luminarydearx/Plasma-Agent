@@ -23,6 +23,8 @@ class AgentResponse:
 def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
     calls = []
     content = content.strip()
+    if not content:
+        return calls
 
     try:
         data = json.loads(content)
@@ -97,10 +99,13 @@ def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
 
 
 def _get_username() -> str:
+    username = os.environ.get("USERNAME") or os.environ.get("USER")
+    if username:
+        return username
     try:
         return os.getlogin()
     except OSError:
-        return os.environ.get("USERNAME") or os.environ.get("USER") or "user"
+        return "user"
 
 
 def _build_system_prompt() -> str:
@@ -109,7 +114,6 @@ def _build_system_prompt() -> str:
     documents = home / "Documents"
     desktop = home / "Desktop"
     downloads = home / "Downloads"
-    cwd = Path.cwd()
 
     tool_names = ", ".join(TOOL_REGISTRY.keys())
 
@@ -168,13 +172,13 @@ class AgentOrchestrator:
             try:
                 payload = await self._call_model()
             except httpx.TimeoutException:
-                final_text = "⚠️ Request timeout (120s). Try shorter questions or break down complex tasks."
+                final_text = "⚠️ Request timeout (180s). Try shorter questions or break down complex tasks."
                 break
             except httpx.HTTPError as e:
                 final_text = f"⚠️ Network error: {e}\n\nCheck if Ollama is running: `ollama serve`"
                 break
             except Exception as e:
-                final_text = f"⚠️ Unexpected error: {e}"
+                final_text = f"⚠️ Unexpected error: {type(e).__name__}: {e}"
                 break
 
             message = payload.get("message", {})
@@ -215,7 +219,7 @@ class AgentOrchestrator:
                     except TypeError as e:
                         result = ToolResult(False, f"Invalid arguments for {name}: {e}")
                     except Exception as e:
-                        result = ToolResult(False, f"Tool error: {e}")
+                        result = ToolResult(False, f"Tool error: {type(e).__name__}: {e}")
 
                 tool_calls_made.append({"name": name, "args": args, "id": call_id})
                 tool_results.append({"name": name, "result": result})
@@ -246,11 +250,11 @@ class AgentOrchestrator:
                 "temperature": 0.3,
                 "top_p": 0.85,
                 "repeat_penalty": 1.2,
-                "num_ctx": 2048,
+                "num_ctx": 8192,
             },
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=180.0) as client:
             response = await client.post(
                 f"{self._ollama._base_url}/api/chat",
                 json=payload,
