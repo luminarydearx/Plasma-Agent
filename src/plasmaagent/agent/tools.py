@@ -42,6 +42,11 @@ from plasmaagent.tools import (
     screenshot,
     send_notification,
     security_audit,
+    vault_backup,
+    vault_restore,
+    vault_list_backups,
+    vault_delete_backup,
+    vault_generate_recovery_key,
 )
 
 
@@ -403,6 +408,71 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             "required": ["project_path"],
         },
         handler=security_audit,
+        requires_permission=False,
+    ),
+    "vault_backup": ToolDefinition(
+        name="vault_backup",
+        description="Create an encrypted backup of a directory. Zero-knowledge encryption - only you can decrypt with recovery key. Use for disaster recovery and ransomware protection.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "source_path": {"type": "string", "description": "Directory to backup"},
+                "backup_type": {"type": "string", "description": "Backup type: snapshot, full, incremental", "default": "snapshot"},
+                "compress": {"type": "boolean", "description": "Compress backup", "default": True},
+                "encrypt": {"type": "boolean", "description": "Encrypt backup (recommended)", "default": True},
+                "recovery_key": {"type": "string", "description": "Existing recovery key (optional, will generate new if empty)", "default": ""},
+            },
+            "required": ["source_path"],
+        },
+        handler=vault_backup,
+        requires_permission=True,
+    ),
+    "vault_restore": ToolDefinition(
+        name="vault_restore",
+        description="Restore from an encrypted backup. Requires recovery key to decrypt.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "backup_id": {"type": "string", "description": "Backup ID to restore"},
+                "restore_path": {"type": "string", "description": "Path to restore to (optional, defaults to original location)", "default": ""},
+                "overwrite": {"type": "boolean", "description": "Overwrite existing files", "default": False},
+                "recovery_key": {"type": "string", "description": "Recovery key for decryption"},
+            },
+            "required": ["backup_id", "recovery_key"],
+        },
+        handler=vault_restore,
+        requires_permission=True,
+    ),
+    "vault_list_backups": ToolDefinition(
+        name="vault_list_backups",
+        description="List all available VaultSync backups.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "description": "Maximum backups to show", "default": 50},
+            },
+        },
+        handler=vault_list_backups,
+        requires_permission=False,
+    ),
+    "vault_delete_backup": ToolDefinition(
+        name="vault_delete_backup",
+        description="Delete a VaultSync backup.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "backup_id": {"type": "string", "description": "Backup ID to delete"},
+            },
+            "required": ["backup_id"],
+        },
+        handler=vault_delete_backup,
+        requires_permission=True,
+    ),
+    "vault_generate_recovery_key": ToolDefinition(
+        name="vault_generate_recovery_key",
+        description="Generate a new recovery key for VaultSync encryption.",
+        parameters={"type": "object", "properties": {}},
+        handler=vault_generate_recovery_key,
         requires_permission=False,
     ),
 }

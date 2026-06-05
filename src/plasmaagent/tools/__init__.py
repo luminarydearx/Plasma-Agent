@@ -24,6 +24,13 @@ from plasmaagent.tools.clipboard import clipboard_get, clipboard_set
 from plasmaagent.tools.media import screenshot
 from plasmaagent.tools.notification import send_notification
 from plasmaagent.tools.security import security_audit
+from plasmaagent.tools.vault import (
+    vault_backup,
+    vault_restore,
+    vault_list_backups,
+    vault_delete_backup,
+    vault_generate_recovery_key,
+)
 
 __all__ = [
     "create_file",
@@ -53,4 +60,9 @@ __all__ = [
     "screenshot",
     "send_notification",
     "security_audit",
+    "vault_backup",
+    "vault_restore",
+    "vault_list_backups",
+    "vault_delete_backup",
+    "vault_generate_recovery_key",
 ]
