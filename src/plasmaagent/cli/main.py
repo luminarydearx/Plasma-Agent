@@ -10,7 +10,7 @@ from plasmaagent.core.asyncio_compat import run_async
 app = typer.Typer(
     name="plasma",
     help="PlasmaAgent - Database-Centric Agentic Execution Framework",
-    no_args_is_help=True,
+    invoke_without_command=True,
 )
 
 
@@ -20,8 +20,9 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: Optional[bool] = typer.Option(
         None,
         "--version",
@@ -30,8 +31,40 @@ def main(
         callback=version_callback,
         is_eager=True,
     ),
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Ollama model name for chat mode",
+    ),
+    ollama_url: str = typer.Option(
+        "http://localhost:11434",
+        "--ollama-url",
+        help="Ollama server URL",
+    ),
 ) -> None:
-    pass
+    if ctx.invoked_subcommand is None:
+        from plasmaagent.agent.repl import start_chat
+        start_chat(model=model, base_url=ollama_url)
+
+
+@app.command()
+def chat(
+    model: Optional[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Ollama model name",
+    ),
+    ollama_url: str = typer.Option(
+        "http://localhost:11434",
+        "--ollama-url",
+        help="Ollama server URL",
+    ),
+) -> None:
+    """Start interactive AI chat session (same as running `plasma` with no args)."""
+    from plasmaagent.agent.repl import start_chat
+    start_chat(model=model, base_url=ollama_url)
 
 
 @app.command()
@@ -44,15 +77,17 @@ def doctor() -> None:
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     console.print(f"[#00D4FF]✓[/#00D4FF] Python: {python_version}")
 
-    async def check_all() -> tuple[bool, bool]:
+    async def check_all() -> tuple[bool, bool, bool]:
         from plasmaagent.core.database import get_database
+        from plasmaagent.agent.ollama_client import OllamaClient
 
         db = get_database()
+        ollama = OllamaClient()
+
+        is_healthy = False
+        schema_ok = False
         try:
             await db.connect()
-            is_healthy = False
-            schema_ok = False
-
             async with db.connection() as conn:
                 async with conn.cursor() as cur:
                     await cur.execute("SELECT 1 AS ping")
@@ -67,23 +102,21 @@ def doctor() -> None:
                              AND table_name IN ('tasks', 'task_steps', 'execution_logs', 'telemetry')"""
                     )
                     schema_result = await cur.fetchone()
-                    if (
-                        schema_result is not None
-                        and schema_result.get("table_count", 0) >= 4
-                    ):
+                    if schema_result is not None and schema_result.get("table_count", 0) >= 4:
                         schema_ok = True
-
-            await db.disconnect()
-            return is_healthy, schema_ok
         except Exception:
+            pass
+        finally:
             if db._pool is not None:
                 try:
                     await db.disconnect()
                 except Exception:
                     pass
-            return False, False
 
-    db_healthy, schema_ok = run_async(check_all())
+        ollama_ok = await ollama.health_check()
+        return is_healthy, schema_ok, ollama_ok
+
+    db_healthy, schema_ok, ollama_ok = run_async(check_all())
 
     if db_healthy:
         console.print("[#00D4FF]✓[/#00D4FF] Database: Connected")
@@ -97,6 +130,11 @@ def doctor() -> None:
             "[bold #FF00D4]✗[/bold #FF00D4] Schema: Not initialized "
             "(run 'uv run alembic upgrade head')"
         )
+
+    if ollama_ok:
+        console.print("[#00D4FF]✓[/#00D4FF] Ollama: Reachable")
+    else:
+        console.print("[yellow]⚠[/yellow] Ollama: Not reachable at http://localhost:11434")
 
     console.print()
 

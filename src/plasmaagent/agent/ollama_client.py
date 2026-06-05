@@ -1,6 +1,5 @@
 import httpx
 from typing import Any
-from uuid import UUID
 
 
 class OllamaClient:
@@ -59,25 +58,3 @@ class OllamaClient:
             response.raise_for_status()
             data = response.json()
             return data.get("models", [])
-
-
-class AgentOrchestrator:
-    def __init__(self, ollama: OllamaClient | None = None):
-        self._ollama = ollama or OllamaClient()
-
-    async def process_query(self, query: str, user_id: UUID | None = None) -> dict[str, Any]:
-        system_prompt = """You are PlasmaAgent, an intelligent AI assistant.
-You have access to memory tools. When the user asks something, respond helpfully.
-If you need to store or recall information, mention the tool you would use."""
-
-        response = await self._ollama.generate(
-            prompt=query,
-            system=system_prompt,
-            temperature=0.3
-        )
-
-        return {
-            "response": response,
-            "query": query,
-            "model": self._ollama._model,
-        }
