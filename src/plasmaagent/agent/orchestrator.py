@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from plasmaagent.agent.ollama_client import OllamaClient
 from plasmaagent.agent.tools import TOOL_REGISTRY, ToolResult, get_tools_schema
 
@@ -19,11 +21,9 @@ class AgentResponse:
 
 
 def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
-    """Fallback: parse tool calls from text content when model doesn't support native tool calling."""
     calls = []
     content = content.strip()
     
-    # Try direct JSON parse
     try:
         data = json.loads(content)
         if isinstance(data, dict) and "name" in data:
@@ -56,7 +56,6 @@ def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
     except (json.JSONDecodeError, TypeError):
         pass
     
-    # Try to find JSON block in content (e.g., wrapped in ```json ... ```)
     json_pattern = re.compile(r"```(?:json)?\s*(\{[\s\S]*?\}|\[[\s\S]*?\])\s*```")
     for match in json_pattern.finditer(content):
         try:
@@ -75,7 +74,6 @@ def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
         except (json.JSONDecodeError, TypeError):
             continue
     
-    # Try to find any JSON object with "name" key
     if not calls:
         brace_pattern = re.compile(r"\{[^{}]*\"name\"\s*:\s*\"[^\"]+\"[^{}]*\}")
         for match in brace_pattern.finditer(content):
@@ -98,13 +96,24 @@ def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
     return calls
 
 
-def _build_system_prompt() -> str:
+def _build_system_prompt(simple: bool = False) -> str:
     home = Path.home()
     user_name = os.getlogin() if hasattr(os, "getlogin") else "user"
     documents = home / "Documents"
     desktop = home / "Desktop"
     downloads = home / "Downloads"
     cwd = Path.cwd()
+    
+    if simple:
+        return f"""You are PlasmaAgent, an intelligent AI assistant.
+
+USER CONTEXT:
+- Username: {user_name}
+- Home: {home}
+- Documents: {documents}
+- OS: {"Windows" if os.name == "nt" else "Linux/Mac"}
+
+Respond concisely in the same language the user uses. Be helpful and friendly."""
     
     tool_names = ", ".join(TOOL_REGISTRY.keys())
     
@@ -164,14 +173,20 @@ class AgentOrchestrator:
         ollama: OllamaClient | None = None,
         system_prompt: str = "",
         max_tool_iterations: int = 5,
+        simple_mode: bool = False,
     ):
         self._ollama = ollama or OllamaClient()
-        self._system_prompt = system_prompt or _build_system_prompt()
+        self._simple_mode = simple_mode
+        self._system_prompt = system_prompt or _build_system_prompt(simple=simple_mode)
         self._max_iterations = max_tool_iterations
         self._history: list[dict[str, Any]] = []
 
     def reset_history(self) -> None:
         self._history.clear()
+
+    def set_simple_mode(self, enabled: bool) -> None:
+        self._simple_mode = enabled
+        self._system_prompt = _build_system_prompt(simple=enabled)
 
     async def chat(self, user_message: str) -> AgentResponse:
         self._history.append({"role": "user", "content": user_message})
@@ -183,14 +198,24 @@ class AgentOrchestrator:
 
         while iterations < self._max_iterations:
             iterations += 1
-            payload = await self._call_model_with_tools()
+            
+            try:
+                payload = await self._call_model_with_tools()
+            except httpx.TimeoutException:
+                final_text = "⚠️ Request timeout (90s). Model is thinking too long. Try:\n- `/simple` mode for faster responses\n- Shorter questions\n- Breaking down complex tasks"
+                break
+            except httpx.HTTPError as e:
+                final_text = f"⚠️ Network error: {e}\n\nCheck if Ollama is running: `ollama serve`"
+                break
+            except Exception as e:
+                final_text = f"⚠️ Unexpected error: {e}"
+                break
 
             message = payload.get("message", {})
             content = message.get("content", "")
             tool_calls = message.get("tool_calls") or []
 
-            # Fallback: parse tool calls from content if native tool_calls empty
-            if not tool_calls and content:
+            if not self._simple_mode and not tool_calls and content:
                 parsed = _parse_tool_call_from_text(content)
                 if parsed:
                     tool_calls = parsed
@@ -256,21 +281,21 @@ class AgentOrchestrator:
         )
 
     async def _call_model_with_tools(self) -> dict[str, Any]:
-        import httpx
-
         payload: dict[str, Any] = {
             "model": self._ollama._model,
             "messages": [{"role": "system", "content": self._system_prompt}] + self._history,
             "stream": False,
-            "tools": get_tools_schema(),
             "options": {
                 "temperature": 0.3,
                 "top_p": 0.85,
                 "repeat_penalty": 1.2,
             },
         }
+        
+        if not self._simple_mode:
+            payload["tools"] = get_tools_schema()
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             response = await client.post(
                 f"{self._ollama._base_url}/api/chat",
                 json=payload,

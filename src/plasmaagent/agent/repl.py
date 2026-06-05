@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from typing import Any
 
 from rich.console import Console
@@ -43,8 +44,11 @@ def print_banner(model: str, ollama_url: str) -> None:
         f"[bold #00D4FF]PlasmaAgent Interactive Chat[/bold #00D4FF]\n"
         f"[dim]Model:[/dim] [cyan]{model}[/cyan]\n"
         f"[dim]Ollama:[/dim] [cyan]{ollama_url}[/cyan]\n"
-        f"[dim]Type 'exit' or 'quit' to leave. '/reset' to clear history.[/dim]\n"
-        f"[dim]Type '/tools' to list available tools.[/dim]",
+        f"[dim]Commands:[/dim]\n"
+        f"  [cyan]exit/quit[/cyan] - Leave chat\n"
+        f"  [cyan]/reset[/cyan] - Clear history\n"
+        f"  [cyan]/tools[/cyan] - List available tools\n"
+        f"  [cyan]/simple[/cyan] - Toggle simple mode (faster, no tools)",
         border_style="#00D4FF",
     ))
 
@@ -89,10 +93,16 @@ async def _chat_loop(orchestrator: AgentOrchestrator) -> None:
         if user_input == "/tools":
             print_tools()
             continue
+        if user_input == "/simple":
+            orchestrator._simple_mode = not orchestrator._simple_mode
+            orchestrator._system_prompt = orchestrator._build_system_prompt(simple=orchestrator._simple_mode)
+            mode_str = "ON (faster, no tools)" if orchestrator._simple_mode else "OFF (full features)"
+            console.print(f"[green]Simple mode: {mode_str}[/green]")
+            continue
 
         try:
-            console.print("[dim]Thinking...[/dim]")
-            response = await orchestrator.chat(user_input)
+            with console.status("[bold cyan]Thinking...[/bold cyan]", spinner="dots"):
+                response = await orchestrator.chat(user_input)
 
             for call in response.tool_calls:
                 _print_tool_call(call["name"], call["args"])
@@ -106,8 +116,11 @@ async def _chat_loop(orchestrator: AgentOrchestrator) -> None:
                     console.print(Markdown(response.text))
                 except Exception:
                     console.print(Panel(response.text, border_style="#00D4FF"))
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Request cancelled.[/yellow]")
         except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] {e}")
+            console.print(f"\n[bold red]Error:[/bold red] {e}")
+            console.print("[dim]Try /simple mode for faster responses or check Ollama is running.[/dim]")
 
 
 def start_chat(model: str | None = None, base_url: str = "http://localhost:11434") -> None:
@@ -129,6 +142,7 @@ def start_chat(model: str | None = None, base_url: str = "http://localhost:11434
 
         print_banner(ollama._model, base_url)
         console.print(f"[dim]Loaded {len(TOOL_REGISTRY)} tools[/dim]")
+        console.print("[dim]Tip: Use /simple for faster responses on simple questions[/dim]")
 
         orchestrator = AgentOrchestrator(ollama=ollama)
         await _chat_loop(orchestrator)
