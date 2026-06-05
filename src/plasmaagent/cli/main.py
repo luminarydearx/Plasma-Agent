@@ -3,7 +3,7 @@ from typing import Optional
 import typer
 
 from plasmaagent import __version__
-from plasmaagent.cli.logo import get_logo
+from plasmaagent.cli.logo import get_logo_centered
 from plasmaagent.cli.theme import console, style_info, style_success
 from plasmaagent.core.asyncio_compat import run_async
 
@@ -69,7 +69,7 @@ def chat(
 
 @app.command()
 def doctor() -> None:
-    console.print(get_logo())
+    console.print(get_logo_centered())
     console.print("\n[bold #00D4FF]System Health Check[/bold #00D4FF]\n")
 
     import sys

@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 
 from plasmaagent.agent.ollama_client import OllamaClient
-from plasmaagent.agent.tools import TOOL_REGISTRY, ToolResult, get_tools_schema
+from plasmaagent.agent.tools import TOOL_REGISTRY, ToolResult
 
 
 @dataclass
@@ -23,7 +23,7 @@ class AgentResponse:
 def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
     calls = []
     content = content.strip()
-    
+
     try:
         data = json.loads(content)
         if isinstance(data, dict) and "name" in data:
@@ -55,7 +55,7 @@ def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
                 return calls
     except (json.JSONDecodeError, TypeError):
         pass
-    
+
     json_pattern = re.compile(r"```(?:json)?\s*(\{[\s\S]*?\}|\[[\s\S]*?\])\s*```")
     for match in json_pattern.finditer(content):
         try:
@@ -73,7 +73,7 @@ def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
                 })
         except (json.JSONDecodeError, TypeError):
             continue
-    
+
     if not calls:
         brace_pattern = re.compile(r"\{[^{}]*\"name\"\s*:\s*\"[^\"]+\"[^{}]*\}")
         for match in brace_pattern.finditer(content):
@@ -92,79 +92,51 @@ def _parse_tool_call_from_text(content: str) -> list[dict[str, Any]]:
                     })
             except (json.JSONDecodeError, TypeError):
                 continue
-    
+
     return calls
 
 
-def _build_system_prompt(simple: bool = False) -> str:
+def _get_username() -> str:
+    try:
+        return os.getlogin()
+    except OSError:
+        return os.environ.get("USERNAME") or os.environ.get("USER") or "user"
+
+
+def _build_system_prompt() -> str:
     home = Path.home()
-    user_name = os.getlogin() if hasattr(os, "getlogin") else "user"
+    user_name = _get_username()
     documents = home / "Documents"
     desktop = home / "Desktop"
     downloads = home / "Downloads"
     cwd = Path.cwd()
-    
-    if simple:
-        return f"""You are PlasmaAgent, an intelligent AI assistant.
 
-USER CONTEXT:
-- Username: {user_name}
-- Home: {home}
-- Documents: {documents}
-- OS: {"Windows" if os.name == "nt" else "Linux/Mac"}
-
-Respond concisely in the same language the user uses. Be helpful and friendly."""
-    
     tool_names = ", ".join(TOOL_REGISTRY.keys())
-    
-    return f"""You are PlasmaAgent, an intelligent autonomous AI assistant with direct access to the user's computer.
 
-USER CONTEXT:
-- Username: {user_name}
-- Home directory: {home}
-- Documents folder: {documents}
-- Desktop folder: {desktop}
-- Downloads folder: {downloads}
-- Current working directory: {cwd}
-- Operating System: {"Windows" if os.name == "nt" else "Linux/Mac"}
+    return f"""You are PlasmaAgent, an AI assistant with direct computer access.
 
-AVAILABLE TOOLS ({len(TOOL_REGISTRY)}):
-{tool_names}
+USER: {user_name}
+HOME: {home}
+DOCUMENTS: {documents}
+DESKTOP: {desktop}
+OS: {"Windows" if os.name == "nt" else "Linux/Mac"}
 
-TOOL CALLING FORMAT:
-When you need to use a tool, respond with ONLY a JSON object in this exact format:
-{{
-  "name": "<tool_name>",
-  "arguments": {{
-    "<param1>": "<value1>",
-    "<param2>": "<value2>"
-  }}
-}}
+TOOLS: {tool_names}
 
-GUIDELINES:
-1. Use tools when the user asks you to perform actions on their computer.
-2. ALWAYS use absolute paths with forward slashes (e.g., {documents}/file.txt).
-3. Think step-by-step before acting, but be concise.
-4. If a task requires multiple steps, execute them in sequence (one tool call per response).
-5. After tool execution, you will receive the result and can decide to call another tool or respond to the user.
-6. For file creation: use create_file tool with absolute path and content.
-7. For running commands: use execute_shell tool with PowerShell commands.
-8. For remembering information: use store_memory tool.
-9. For recalling information: use search_memory tool.
-10. DANGEROUS commands (rm -rf, format, DROP TABLE) are blocked for safety.
+TOOL CALL FORMAT (respond with ONLY this JSON when using a tool):
+{{"name": "<tool_name>", "arguments": {{...}}}}
 
 EXAMPLES:
-User: "Buat file hello.txt di Documents dengan isi Hello World"
-You: {{"name": "create_file", "arguments": {{"path": "{documents}/hello.txt", "content": "Hello World"}}}}
+- Create file: {{"name": "create_file", "arguments": {{"path": "{documents}/test.txt", "content": "Hello"}}}}
+- Run command: {{"name": "execute_shell", "arguments": {{"command": "Get-Process"}}}}
+- Remember: {{"name": "store_memory", "arguments": {{"content": "User likes Python", "memory_type": "preference"}}}}
 
-User: "Jalankan perintah Get-Process"
-You: {{"name": "execute_shell", "arguments": {{"command": "Get-Process"}}}}
-
-User: "Ingat bahwa warna favorit saya biru"
-You: {{"name": "store_memory", "arguments": {{"content": "Warna favorit user adalah biru", "memory_type": "preference"}}}}
-
-Respond in the same language the user uses.
-When NOT using a tool, respond with normal text."""
+RULES:
+- Use tools when user asks for actions on computer
+- Use absolute paths with forward slashes
+- Be concise, no unnecessary explanation
+- Respond in user's language
+- When NOT using tools, respond normally"""
 
 
 class AgentOrchestrator:
@@ -173,20 +145,14 @@ class AgentOrchestrator:
         ollama: OllamaClient | None = None,
         system_prompt: str = "",
         max_tool_iterations: int = 5,
-        simple_mode: bool = False,
     ):
         self._ollama = ollama or OllamaClient()
-        self._simple_mode = simple_mode
-        self._system_prompt = system_prompt or _build_system_prompt(simple=simple_mode)
+        self._system_prompt = system_prompt or _build_system_prompt()
         self._max_iterations = max_tool_iterations
         self._history: list[dict[str, Any]] = []
 
     def reset_history(self) -> None:
         self._history.clear()
-
-    def set_simple_mode(self, enabled: bool) -> None:
-        self._simple_mode = enabled
-        self._system_prompt = _build_system_prompt(simple=enabled)
 
     async def chat(self, user_message: str) -> AgentResponse:
         self._history.append({"role": "user", "content": user_message})
@@ -198,11 +164,11 @@ class AgentOrchestrator:
 
         while iterations < self._max_iterations:
             iterations += 1
-            
+
             try:
-                payload = await self._call_model_with_tools()
+                payload = await self._call_model()
             except httpx.TimeoutException:
-                final_text = "⚠️ Request timeout (90s). Model is thinking too long. Try:\n- `/simple` mode for faster responses\n- Shorter questions\n- Breaking down complex tasks"
+                final_text = "⚠️ Request timeout (120s). Try shorter questions or break down complex tasks."
                 break
             except httpx.HTTPError as e:
                 final_text = f"⚠️ Network error: {e}\n\nCheck if Ollama is running: `ollama serve`"
@@ -213,29 +179,20 @@ class AgentOrchestrator:
 
             message = payload.get("message", {})
             content = message.get("content", "")
-            tool_calls = message.get("tool_calls") or []
 
-            if not self._simple_mode and not tool_calls and content:
-                parsed = _parse_tool_call_from_text(content)
-                if parsed:
-                    tool_calls = parsed
-                    content = ""
+            parsed = _parse_tool_call_from_text(content) if content else []
 
-            if not tool_calls:
+            if not parsed:
                 final_text = content
                 self._history.append({"role": "assistant", "content": content})
                 break
 
-            if content:
-                self._history.append({"role": "assistant", "content": content})
-
             self._history.append({
                 "role": "assistant",
                 "content": content or "",
-                "tool_calls": tool_calls,
             })
 
-            for call in tool_calls:
+            for call in parsed:
                 fn = call.get("function", {})
                 name = fn.get("name", "")
                 raw_args = fn.get("arguments", {})
@@ -280,7 +237,7 @@ class AgentOrchestrator:
             tool_results=tool_results,
         )
 
-    async def _call_model_with_tools(self) -> dict[str, Any]:
+    async def _call_model(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._ollama._model,
             "messages": [{"role": "system", "content": self._system_prompt}] + self._history,
@@ -289,13 +246,11 @@ class AgentOrchestrator:
                 "temperature": 0.3,
                 "top_p": 0.85,
                 "repeat_penalty": 1.2,
+                "num_ctx": 2048,
             },
         }
-        
-        if not self._simple_mode:
-            payload["tools"] = get_tools_schema()
 
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{self._ollama._base_url}/api/chat",
                 json=payload,
