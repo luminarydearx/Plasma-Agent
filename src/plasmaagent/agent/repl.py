@@ -14,7 +14,8 @@ from rich.panel import Panel
 from rich.table import Table
 
 if TYPE_CHECKING:
-    from plasmaagent.agent.ollama_client import AgentOrchestrator, OllamaClient
+    from plasmaagent.agent.ollama_client import OllamaClient
+    from plasmaagent.agent.orchestrator import AgentOrchestrator
 
 console = Console()
 
@@ -294,7 +295,8 @@ def _chat_loop_fallback(orchestrator: "AgentOrchestrator") -> None:
 
 def start_chat(model: str = "qwen2.5-coder:7b-instruct", base_url: str = "http://localhost:11434") -> None:
     from plasmaagent.agent.config_manager import get_default_model, set_default_model
-    from plasmaagent.agent.ollama_client import AgentOrchestrator, OllamaClient
+    from plasmaagent.agent.ollama_client import OllamaClient
+    from plasmaagent.agent.orchestrator import AgentOrchestrator
 
     async def main():
         from plasmaagent.core.database import get_database

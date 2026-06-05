@@ -1,13 +1,15 @@
 from enum import Enum
 from typing import Optional
 
-import psycopg
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from plasmaagent.core.exceptions import (
     InvalidStateTransitionError,
     TaskLockedError,
     TaskNotFoundError,
 )
+from plasmaagent.core.schema import Task, TaskStep
 
 
 class TaskStatus(str, Enum):
@@ -51,110 +53,110 @@ VALID_STEP_TRANSITIONS: dict[StepStatus, set[StepStatus]] = {
 
 
 async def transition_task_state(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     task_id: str,
     new_status: TaskStatus,
 ) -> bool:
-    async with conn.cursor() as cur:
-        await cur.execute(
-            "SELECT status FROM tasks WHERE id = %s FOR UPDATE SKIP LOCKED",
-            (task_id,),
+    from uuid import UUID
+    task_uuid = UUID(task_id) if isinstance(task_id, str) else task_id
+    
+    stmt = select(Task).where(Task.id == task_uuid).with_for_update()
+    result = await session.execute(stmt)
+    task = result.scalar_one_or_none()
+
+    if task is None:
+        check_stmt = select(Task).where(Task.id == task_uuid)
+        check_result = await session.execute(check_stmt)
+        if check_result.scalar_one_or_none() is None:
+            raise TaskNotFoundError(task_id)
+        else:
+            raise TaskLockedError(task_id)
+
+    current_status = TaskStatus(task.status)
+
+    if new_status not in VALID_TASK_TRANSITIONS.get(current_status, set()):
+        raise InvalidStateTransitionError(
+            current_status.value, new_status.value, task_id
         )
-        result = await cur.fetchone()
 
-        if result is None:
-            await cur.execute(
-                "SELECT status FROM tasks WHERE id = %s",
-                (task_id,),
-            )
-            locked_result = await cur.fetchone()
-            if locked_result is None:
-                raise TaskNotFoundError(task_id)
-            else:
-                raise TaskLockedError(task_id)
-
-        current_status = TaskStatus(result["status"])
-
-        if new_status not in VALID_TASK_TRANSITIONS.get(current_status, set()):
-            raise InvalidStateTransitionError(
-                current_status.value, new_status.value, task_id
-            )
-
-        await cur.execute(
-            "UPDATE tasks SET status = %s, updated_at = NOW() WHERE id = %s",
-            (new_status.value, task_id),
-        )
-        return True
+    from datetime import datetime, timezone
+    task.status = new_status.value
+    task.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    return True
 
 
 async def transition_step_state(
-    conn: psycopg.AsyncConnection,
+    session: AsyncSession,
     step_id: str,
     new_status: StepStatus,
     output: Optional[str] = None,
 ) -> bool:
-    async with conn.cursor() as cur:
-        await cur.execute(
-            "SELECT status FROM task_steps WHERE id = %s FOR UPDATE",
-            (step_id,),
+    from uuid import UUID
+    from datetime import datetime, timezone
+    
+    step_uuid = UUID(step_id) if isinstance(step_id, str) else step_id
+    
+    stmt = select(TaskStep).where(TaskStep.id == step_uuid).with_for_update()
+    result = await session.execute(stmt)
+    step = result.scalar_one_or_none()
+    
+    if step is None:
+        raise TaskNotFoundError(step_id)
+
+    current_status = StepStatus(step.status)
+
+    if new_status not in VALID_STEP_TRANSITIONS.get(current_status, set()):
+        raise InvalidStateTransitionError(
+            current_status.value, new_status.value, step_id
         )
-        result = await cur.fetchone()
-        if result is None:
-            raise TaskNotFoundError(step_id)
 
-        current_status = StepStatus(result["status"])
+    step.status = new_status.value
+    
+    now = datetime.now(timezone.utc)
+    if new_status == StepStatus.RUNNING:
+        step.started_at = now
+    elif new_status in {StepStatus.COMPLETED, StepStatus.FAILED}:
+        step.finished_at = now
 
-        if new_status not in VALID_STEP_TRANSITIONS.get(current_status, set()):
-            raise InvalidStateTransitionError(
-                current_status.value, new_status.value, step_id
-            )
+    if output is not None:
+        step.output = output
 
-        update_fields = ["status = %s"]
-        params: list = [new_status.value]
+    await session.commit()
+    return True
 
-        if new_status == StepStatus.RUNNING:
-            update_fields.append("started_at = NOW()")
-        elif new_status in {StepStatus.COMPLETED, StepStatus.FAILED}:
-            update_fields.append("finished_at = NOW()")
 
-        if output is not None:
-            update_fields.append("output = %s")
-            params.append(output)
+async def recover_crashed_tasks(session: AsyncSession) -> int:
+    from uuid import UUID
+    from datetime import datetime, timezone
+    
+    stmt = select(Task).where(Task.status == TaskStatus.RUNNING.value).with_for_update()
+    result = await session.execute(stmt)
+    running_tasks = result.scalars().all()
+    
+    recovered_count = 0
+    now = datetime.now(timezone.utc)
 
-        params.append(step_id)
-
-        await cur.execute(
-            f"UPDATE task_steps SET {', '.join(update_fields)} WHERE id = %s",
-            params,
+    for task in running_tasks:
+        task.status = TaskStatus.PAUSED.value
+        task.updated_at = now
+        
+        step_stmt = select(TaskStep).where(
+            TaskStep.task_id == task.id,
+            TaskStep.status == StepStatus.RUNNING.value
         )
-        return True
+        step_result = await session.execute(step_stmt)
+        running_steps = step_result.scalars().all()
+        
+        for step in running_steps:
+            step.status = StepStatus.FAILED.value
+            step.finished_at = now
+            step.output = (step.output or "") + "\n[CRASH RECOVERY] Task interrupted"
+        
+        recovered_count += 1
 
-
-async def recover_crashed_tasks(conn: psycopg.AsyncConnection) -> int:
-    async with conn.cursor() as cur:
-        await cur.execute(
-            "SELECT id FROM tasks WHERE status = %s FOR UPDATE SKIP LOCKED",
-            (TaskStatus.RUNNING.value,),
-        )
-        running_tasks = await cur.fetchall()
-        recovered_count = 0
-
-        for task_row in running_tasks:
-            task_id = task_row["id"]
-            await cur.execute(
-                "UPDATE tasks SET status = %s, updated_at = NOW() WHERE id = %s",
-                (TaskStatus.PAUSED.value, task_id),
-            )
-            await cur.execute(
-                """UPDATE task_steps
-                   SET status = %s, finished_at = NOW(),
-                       output = COALESCE(output, '') || E'\n[CRASH RECOVERY] Task interrupted'
-                   WHERE task_id = %s AND status = %s""",
-                (StepStatus.FAILED.value, task_id, StepStatus.RUNNING.value),
-            )
-            recovered_count += 1
-
-        return recovered_count
+    await session.commit()
+    return recovered_count
 
 
 def is_valid_task_transition(current: TaskStatus, target: TaskStatus) -> bool:
