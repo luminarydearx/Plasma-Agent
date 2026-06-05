@@ -1,6 +1,8 @@
 from uuid import UUID, uuid4
-from datetime import datetime
+from datetime import datetime, timezone
+import json
 import psycopg
+from psycopg.types.json import Jsonb
 from plasmaagent.memory.models import Memory, MemoryType, MemoryStats
 
 
@@ -23,16 +25,16 @@ class MemoryService:
         embedding: list[float] | None = None
     ) -> Memory:
         memory_id = uuid4()
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         metadata = metadata or {}
-        embedding_str = str(embedding) if embedding else None
+        embedding_str = json.dumps(embedding) if embedding else None
 
         await self._conn.execute(
             """
             INSERT INTO memories (id, user_id, content, embedding, metadata, memory_type, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (memory_id, user_id, content, embedding_str, metadata, memory_type.value, now, now)
+            (memory_id, user_id, content, embedding_str, Jsonb(metadata), memory_type.value, now, now)
         )
 
         return Memory(
@@ -76,8 +78,13 @@ class MemoryService:
         memory_type: MemoryType | None = None,
         user_id: UUID | None = None
     ) -> list[Memory]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+        if not query or len(query) > 1000:
+            raise ValueError("query must be 1-1000 characters")
+
         conditions = ["content ILIKE %s"]
-        params = [f"%{query}%"]
+        params: list = [f"%{query}%"]
 
         if memory_type:
             conditions.append("memory_type = %s")
@@ -110,6 +117,9 @@ class MemoryService:
         limit: int = 100,
         user_id: UUID | None = None
     ) -> list[Memory]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit must be between 1 and 1000")
+
         async with self._conn.cursor() as cur:
             if user_id:
                 await cur.execute(
@@ -137,20 +147,20 @@ class MemoryService:
 
     async def get_stats(self) -> MemoryStats:
         async with self._conn.cursor() as cur:
-            await cur.execute("SELECT COUNT(*) FROM memories")
-            total = (await cur.fetchone())[0]
+            await cur.execute("SELECT COUNT(*) as cnt FROM memories")
+            total = (await cur.fetchone())["cnt"]
 
             await cur.execute(
-                "SELECT memory_type, COUNT(*) as count FROM memories GROUP BY memory_type"
+                "SELECT memory_type, COUNT(*) as cnt FROM memories GROUP BY memory_type"
             )
             type_counts = await cur.fetchall()
-            memories_by_type = {row[0]: row[1] for row in type_counts}
+            memories_by_type = {row["memory_type"]: row["cnt"] for row in type_counts}
 
-            await cur.execute("SELECT COUNT(*) FROM conversation_sessions")
-            total_conversations = (await cur.fetchone())[0]
+            await cur.execute("SELECT COUNT(*) as cnt FROM conversation_sessions")
+            total_conversations = (await cur.fetchone())["cnt"]
 
-            await cur.execute("SELECT COUNT(*) FROM task_patterns")
-            total_patterns = (await cur.fetchone())[0]
+            await cur.execute("SELECT COUNT(*) as cnt FROM task_patterns")
+            total_patterns = (await cur.fetchone())["cnt"]
 
         return MemoryStats(
             total_memories=total or 0,
@@ -160,21 +170,32 @@ class MemoryService:
             avg_embedding_dimensions=384
         )
 
-    def _row_to_memory(self, row) -> Memory:
+    def _row_to_memory(self, row: dict) -> Memory:
         embedding = None
-        if row[3]:
+        if row.get("embedding"):
+            raw = row["embedding"]
+            if isinstance(raw, str):
+                try:
+                    embedding = json.loads(raw)
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    embedding = None
+            elif isinstance(raw, list):
+                embedding = raw
+
+        metadata = row.get("metadata") or {}
+        if isinstance(metadata, str):
             try:
-                embedding = eval(row[3])
-            except:
-                embedding = None
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, ValueError, TypeError):
+                metadata = {}
 
         return Memory(
-            id=row[0],
-            user_id=row[1],
-            content=row[2],
+            id=row["id"],
+            user_id=row.get("user_id"),
+            content=row["content"],
             embedding=embedding,
-            metadata=row[4],
-            memory_type=MemoryType(row[5]),
-            created_at=row[6],
-            updated_at=row[7]
+            metadata=metadata,
+            memory_type=MemoryType(row["memory_type"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"]
         )

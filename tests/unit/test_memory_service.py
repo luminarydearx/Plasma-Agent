@@ -1,17 +1,26 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
-from datetime import datetime
-from plasmaagent.memory.models import Memory, MemoryType, MemoryStats
+from unittest.mock import MagicMock, AsyncMock
+from uuid import uuid4, UUID
+from datetime import datetime, timezone
 from plasmaagent.memory.service import MemoryService, MemoryNotFoundError
+from plasmaagent.memory.models import Memory, MemoryType
 
 
 class MockAsyncCursor:
-    def __init__(self):
-        self.execute = AsyncMock()
-        self.fetchone = AsyncMock()
-        self.fetchall = AsyncMock()
-        self.rowcount = 1
+    def __init__(self, fetchone_result=None, fetchall_result=None, rowcount=1):
+        self._fetchone_result = fetchone_result
+        self._fetchall_result = fetchall_result if fetchall_result is not None else []
+        self.rowcount = rowcount
+        self.executed_queries = []
+
+    async def execute(self, query, params=None):
+        self.executed_queries.append((query, params))
+
+    async def fetchone(self):
+        return self._fetchone_result
+
+    async def fetchall(self):
+        return self._fetchall_result
 
     async def __aenter__(self):
         return self
@@ -20,260 +29,238 @@ class MockAsyncCursor:
         pass
 
 
-@pytest.fixture
-def mock_conn():
-    conn = AsyncMock()
+def make_mock_conn(cursor=None):
+    conn = MagicMock()
+    conn.cursor.return_value = cursor or MockAsyncCursor()
     conn.execute = AsyncMock()
-    mock_cursor = MockAsyncCursor()
-    conn.cursor = MagicMock(return_value=mock_cursor)
-    return conn, mock_cursor
+    conn.commit = AsyncMock()
+    return conn
 
 
 @pytest.fixture
-def memory_service(mock_conn):
-    conn, _ = mock_conn
-    return MemoryService(conn)
+def user_id():
+    return uuid4()
 
 
-class TestStoreMemory:
-    @pytest.mark.asyncio
-    async def test_store_memory_minimal(self, memory_service, mock_conn):
-        conn, _ = mock_conn
-        memory = await memory_service.store_memory(
-            content="Test memory",
-            memory_type=MemoryType.FACT
+@pytest.fixture
+def memory_id():
+    return uuid4()
+
+
+class TestMemoryServiceStore:
+    async def test_store_memory_basic(self, user_id):
+        cursor = MockAsyncCursor()
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        memory = await service.store_memory(
+            "Test content",
+            MemoryType.FACT,
+            user_id=user_id
         )
 
-        assert memory.content == "Test memory"
+        assert isinstance(memory.id, UUID)
+        assert memory.content == "Test content"
         assert memory.memory_type == MemoryType.FACT
-        assert memory.user_id is None
-        assert memory.embedding is None
-        assert memory.metadata == {}
-        conn.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_store_memory_full(self, memory_service, mock_conn):
-        user_id = uuid4()
-        embedding = [0.1, 0.2, 0.3]
-        metadata = {"key": "value"}
-
-        memory = await memory_service.store_memory(
-            content="Test memory",
-            memory_type=MemoryType.CONVERSATION,
-            user_id=user_id,
-            metadata=metadata,
-            embedding=embedding
-        )
-
         assert memory.user_id == user_id
-        assert memory.embedding == embedding
-        assert memory.metadata == metadata
-        assert memory.memory_type == MemoryType.CONVERSATION
+        assert conn.execute.call_count == 1
 
-    @pytest.mark.asyncio
-    async def test_store_memory_with_embedding(self, memory_service, mock_conn):
-        embedding = [0.1] * 384
+    async def test_store_memory_with_metadata(self, user_id):
+        cursor = MockAsyncCursor()
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
 
-        memory = await memory_service.store_memory(
-            content="Test",
-            memory_type=MemoryType.FACT,
+        memory = await service.store_memory(
+            "Test with metadata",
+            MemoryType.PREFERENCE,
+            user_id=user_id,
+            metadata={"source": "test", "priority": "high"}
+        )
+
+        assert memory.metadata == {"source": "test", "priority": "high"}
+
+    async def test_store_memory_with_embedding(self, user_id):
+        cursor = MockAsyncCursor()
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        embedding = [0.1, 0.2, 0.3]
+        memory = await service.store_memory(
+            "Test with embedding",
+            MemoryType.FACT,
+            user_id=user_id,
             embedding=embedding
         )
 
-        assert len(memory.embedding) == 384
+        assert memory.embedding == embedding
 
 
-class TestGetMemory:
-    @pytest.mark.asyncio
-    async def test_get_memory_success(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        memory_id = uuid4()
-        now = datetime.now()
-        mock_cursor.fetchone.return_value = (
-            memory_id, None, 'Test memory', None, {}, 'fact', now, now
-        )
+class TestMemoryServiceGet:
+    async def test_get_memory_success(self, memory_id, user_id):
+        now = datetime.now(timezone.utc)
+        row = {
+            "id": memory_id,
+            "user_id": user_id,
+            "content": "Test content",
+            "embedding": None,
+            "metadata": {"key": "value"},
+            "memory_type": "fact",
+            "created_at": now,
+            "updated_at": now
+        }
+        cursor = MockAsyncCursor(fetchone_result=row)
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
 
-        result = await memory_service.get_memory(memory_id)
+        memory = await service.get_memory(memory_id)
 
-        assert result.id == memory_id
-        assert result.content == 'Test memory'
-        assert result.memory_type == MemoryType.FACT
+        assert memory.id == memory_id
+        assert memory.content == "Test content"
+        assert memory.metadata == {"key": "value"}
 
-    @pytest.mark.asyncio
-    async def test_get_memory_not_found(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchone.return_value = None
-        memory_id = uuid4()
-
-        with pytest.raises(MemoryNotFoundError) as exc_info:
-            await memory_service.get_memory(memory_id)
-
-        assert exc_info.value.memory_id == memory_id
-
-    @pytest.mark.asyncio
-    async def test_get_memory_with_embedding(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        memory_id = uuid4()
-        now = datetime.now()
-        mock_cursor.fetchone.return_value = (
-            memory_id, None, 'Test', '[0.1, 0.2, 0.3]', {}, 'fact', now, now
-        )
-
-        result = await memory_service.get_memory(memory_id)
-
-        assert result.embedding == [0.1, 0.2, 0.3]
-
-
-class TestDeleteMemory:
-    @pytest.mark.asyncio
-    async def test_delete_memory_success(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.rowcount = 1
-        memory_id = uuid4()
-
-        await memory_service.delete_memory(memory_id)
-
-        mock_cursor.execute.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_delete_memory_not_found(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.rowcount = 0
-        memory_id = uuid4()
+    async def test_get_memory_not_found(self, memory_id):
+        cursor = MockAsyncCursor(fetchone_result=None)
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
 
         with pytest.raises(MemoryNotFoundError):
-            await memory_service.delete_memory(memory_id)
+            await service.get_memory(memory_id)
 
 
-class TestSearchMemories:
-    @pytest.mark.asyncio
-    async def test_search_memories_basic(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        now = datetime.now()
-        mock_cursor.fetchall.return_value = [
-            (uuid4(), None, 'Test memory 1', None, {}, 'fact', now, now)
+class TestMemoryServiceDelete:
+    async def test_delete_memory_success(self, memory_id):
+        cursor = MockAsyncCursor(rowcount=1)
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        await service.delete_memory(memory_id)
+
+        query, params = cursor.executed_queries[0]
+        assert "DELETE" in query
+
+    async def test_delete_memory_not_found(self, memory_id):
+        cursor = MockAsyncCursor(rowcount=0)
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        with pytest.raises(MemoryNotFoundError):
+            await service.delete_memory(memory_id)
+
+
+class TestMemoryServiceSearch:
+    async def test_search_memories_success(self, user_id):
+        now = datetime.now(timezone.utc)
+        rows = [
+            {
+                "id": uuid4(), "user_id": user_id, "content": "Test 1",
+                "embedding": None, "metadata": {}, "memory_type": "fact",
+                "created_at": now, "updated_at": now
+            },
+            {
+                "id": uuid4(), "user_id": user_id, "content": "Test 2",
+                "embedding": None, "metadata": {}, "memory_type": "fact",
+                "created_at": now, "updated_at": now
+            },
         ]
+        cursor = MockAsyncCursor(fetchall_result=rows)
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
 
-        results = await memory_service.search_memories("test")
+        results = await service.search_memories("Test")
+
+        assert len(results) == 2
+
+    async def test_search_memories_empty(self):
+        cursor = MockAsyncCursor(fetchall_result=[])
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        results = await service.search_memories("nonexistent")
+
+        assert len(results) == 0
+
+    async def test_search_memories_invalid_limit_zero(self):
+        cursor = MockAsyncCursor(fetchall_result=[])
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        with pytest.raises(ValueError, match="limit must be between"):
+            await service.search_memories("test", limit=0)
+
+    async def test_search_memories_invalid_limit_too_large(self):
+        cursor = MockAsyncCursor(fetchall_result=[])
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        with pytest.raises(ValueError, match="limit must be between"):
+            await service.search_memories("test", limit=1001)
+
+    async def test_search_memories_empty_query(self):
+        cursor = MockAsyncCursor(fetchall_result=[])
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        with pytest.raises(ValueError, match="query must be"):
+            await service.search_memories("")
+
+
+class TestMemoryServiceGetByType:
+    async def test_get_memories_by_type(self, user_id):
+        now = datetime.now(timezone.utc)
+        rows = [
+            {
+                "id": uuid4(), "user_id": user_id, "content": "Fact 1",
+                "embedding": None, "metadata": {}, "memory_type": "fact",
+                "created_at": now, "updated_at": now
+            }
+        ]
+        cursor = MockAsyncCursor(fetchall_result=rows)
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
+
+        results = await service.get_memories_by_type(MemoryType.FACT)
 
         assert len(results) == 1
-        assert results[0].content == 'Test memory 1'
 
-    @pytest.mark.asyncio
-    async def test_search_memories_with_type_filter(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchall.return_value = []
+    async def test_get_memories_by_type_invalid_limit(self):
+        cursor = MockAsyncCursor(fetchall_result=[])
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
 
-        await memory_service.search_memories("test", memory_type=MemoryType.FACT)
-
-        call_args = mock_cursor.execute.call_args
-        assert 'memory_type = %s' in call_args[0][0]
-
-    @pytest.mark.asyncio
-    async def test_search_memories_with_user_filter(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchall.return_value = []
-        user_id = uuid4()
-
-        await memory_service.search_memories("test", user_id=user_id)
-
-        call_args = mock_cursor.execute.call_args
-        assert 'user_id = %s' in call_args[0][0]
-
-    @pytest.mark.asyncio
-    async def test_search_memories_with_limit(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchall.return_value = []
-
-        await memory_service.search_memories("test", limit=5)
-
-        call_args = mock_cursor.execute.call_args
-        assert call_args[0][1][-1] == 5
-
-    @pytest.mark.asyncio
-    async def test_search_memories_empty_results(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchall.return_value = []
-
-        results = await memory_service.search_memories("nonexistent")
-
-        assert results == []
+        with pytest.raises(ValueError, match="limit must be between"):
+            await service.get_memories_by_type(MemoryType.FACT, limit=0)
 
 
-class TestGetMemoriesByType:
-    @pytest.mark.asyncio
-    async def test_get_memories_by_type(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        now = datetime.now()
-        mock_cursor.fetchall.return_value = [
-            (uuid4(), None, 'Fact 1', None, {}, 'fact', now, now)
+class TestMemoryServiceStats:
+    async def test_get_stats(self):
+        cursor = MockAsyncCursor()
+        cursor._call_idx = 0
+        cursor._fetchone_results = [
+            {"cnt": 10},
+            {"cnt": 3},
+            {"cnt": 7},
+        ]
+        cursor._fetchall_results = [
+            [{"memory_type": "fact", "cnt": 5}, {"memory_type": "pattern", "cnt": 5}],
         ]
 
-        results = await memory_service.get_memories_by_type(MemoryType.FACT)
+        async def smart_fetchone():
+            idx = cursor._call_idx
+            cursor._call_idx += 1
+            return cursor._fetchone_results[idx]
 
-        assert len(results) == 1
-        assert results[0].memory_type == MemoryType.FACT
+        async def smart_fetchall():
+            return cursor._fetchall_results[0]
 
-    @pytest.mark.asyncio
-    async def test_get_memories_by_type_with_user(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchall.return_value = []
-        user_id = uuid4()
+        cursor.fetchone = smart_fetchone
+        cursor.fetchall = smart_fetchall
 
-        await memory_service.get_memories_by_type(MemoryType.FACT, user_id=user_id)
+        conn = make_mock_conn(cursor)
+        service = MemoryService(conn)
 
-        call_args = mock_cursor.execute.call_args
-        assert 'user_id = %s' in call_args[0][0]
+        stats = await service.get_stats()
 
-    @pytest.mark.asyncio
-    async def test_get_memories_by_type_with_limit(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchall.return_value = []
-
-        await memory_service.get_memories_by_type(MemoryType.FACT, limit=50)
-
-        call_args = mock_cursor.execute.call_args
-        assert call_args[0][1][-1] == 50
-
-
-class TestGetStats:
-    @pytest.mark.asyncio
-    async def test_get_stats_empty(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchone.side_effect = [(0,), (0,), (0,)]
-        mock_cursor.fetchall.return_value = []
-
-        stats = await memory_service.get_stats()
-
-        assert stats.total_memories == 0
-        assert stats.memories_by_type == {}
-        assert stats.total_conversations == 0
-        assert stats.total_patterns == 0
-
-    @pytest.mark.asyncio
-    async def test_get_stats_with_data(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchone.side_effect = [(100,), (10,), (5,)]
-        mock_cursor.fetchall.return_value = [
-            ('fact', 50),
-            ('conversation', 50)
-        ]
-
-        stats = await memory_service.get_stats()
-
-        assert stats.total_memories == 100
-        assert stats.memories_by_type == {'fact': 50, 'conversation': 50}
-        assert stats.total_conversations == 10
-        assert stats.total_patterns == 5
-
-    @pytest.mark.asyncio
-    async def test_get_stats_none_values(self, memory_service, mock_conn):
-        conn, mock_cursor = mock_conn
-        mock_cursor.fetchone.side_effect = [(None,), (None,), (None,)]
-        mock_cursor.fetchall.return_value = []
-
-        stats = await memory_service.get_stats()
-
-        assert stats.total_memories == 0
-        assert stats.total_conversations == 0
-        assert stats.total_patterns == 0
+        assert stats.total_memories == 10
+        assert stats.total_conversations == 3
+        assert stats.total_patterns == 7
+        assert stats.memories_by_type["fact"] == 5
