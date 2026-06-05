@@ -133,6 +133,8 @@ TOOL CALL FORMAT (respond with ONLY this JSON when using a tool):
 EXAMPLES:
 - Create file: {{"name": "create_file", "arguments": {{"path": "{documents}/test.txt", "content": "Hello"}}}}
 - Run command: {{"name": "execute_shell", "arguments": {{"command": "Get-Process"}}}}
+- Open app: {{"name": "open_app", "arguments": {{"app_name": "msedge", "arguments": "https://youtube.com"}}}}
+- Schedule task: {{"name": "cron_schedule", "arguments": {{"task_name": "backup", "cron_expression": "0 2 * * *", "commands": ["echo backup"]}}}}
 - Remember: {{"name": "store_memory", "arguments": {{"content": "User likes Python", "memory_type": "preference"}}}}
 
 RULES:
@@ -140,7 +142,9 @@ RULES:
 - Use absolute paths with forward slashes
 - Be concise, no unnecessary explanation
 - Respond in user's language
-- When NOT using tools, respond normally"""
+- When NOT using tools, respond normally
+- For execute_shell, full output will be shown to user
+- For open_app, use Windows app names (msedge, chrome, notepad, etc) or full paths"""
 
 
 class AgentOrchestrator:

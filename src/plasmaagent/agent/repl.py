@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
 import time
 import traceback
 from typing import Any
@@ -14,7 +13,7 @@ from rich.text import Text
 
 from plasmaagent.agent.ollama_client import OllamaClient
 from plasmaagent.agent.orchestrator import AgentOrchestrator
-from plasmaagent.cli.logo import get_logo_centered
+from plasmaagent.cli.logo import PLASMA_LOGO_LINES, LOGO_WIDTH
 from plasmaagent.core.asyncio_compat import run_async
 
 
@@ -36,12 +35,16 @@ def _print_tool_call(name: str, args: dict[str, Any]) -> None:
     console.print(f"  [magenta]\u2192[/magenta] [bold]{name}[/bold]({args_str})")
 
 
-def _print_tool_result(name: str, success: bool, output: str) -> None:
+def _print_tool_result(name: str, success: bool, output: str, full_output: bool = False) -> None:
     marker = "[green]\u2713[/green]" if success else "[red]\u2717[/red]"
-    preview = output.replace("\n", " ")[:200]
-    if len(output) > 200:
-        preview += "..."
-    console.print(f"  {marker} [dim]{name}:[/dim] {preview}")
+    if full_output and output:
+        console.print(f"  {marker} [dim]{name}:[/dim]")
+        console.print(Panel(output, border_style="dim", title=f"Output: {name}", title_align="left"))
+    else:
+        preview = output.replace("\n", " ")[:200]
+        if len(output) > 200:
+            preview += "..."
+        console.print(f"  {marker} [dim]{name}:[/dim] {preview}")
 
 
 def _json_truncate(value: Any, max_len: int = 60) -> str:
@@ -51,21 +54,72 @@ def _json_truncate(value: Any, max_len: int = 60) -> str:
     return s
 
 
-def print_banner(model: str, ollama_url: str, username: str) -> None:
-    console.print(get_logo_centered())
-    console.print(Panel.fit(
-        f"[bold #00D4FF]PlasmaAgent Interactive Chat[/bold #00D4FF]\n"
-        f"[dim]User:[/dim] [cyan]{username}[/cyan]\n"
-        f"[dim]Model:[/dim] [cyan]{model}[/cyan]\n"
-        f"[dim]Ollama:[/dim] [cyan]{ollama_url}[/cyan]\n"
-        f"[dim]Commands:[/dim]\n"
-        f"  [cyan]exit/quit[/cyan] - Leave chat\n"
-        f"  [cyan]/reset[/cyan] - Clear history\n"
-        f"  [cyan]/tools[/cyan] - List available tools\n"
-        f"  [cyan]/model[/cyan] - List available models\n"
-        f"  [cyan]/model <name>[/cyan] - Switch model",
-        border_style="#00D4FF",
-    ))
+def _get_boxed_banner(model: str, ollama_url: str, username: str, tools_count: int) -> str:
+    try:
+        term_width = os.get_terminal_size().columns
+    except OSError:
+        term_width = 80
+
+    box_width = min(term_width - 4, 70)
+    inner_width = box_width - 4
+
+    logo_lines = []
+    for line in PLASMA_LOGO_LINES:
+        clean = line.replace("[#00D4FF]", "").replace("[/#00D4FF]", "")
+        clean = clean.replace("[#FF00D4]", "").replace("[/#FF00D4]", "")
+        clean = clean.replace("[#FFD700]", "").replace("[/#FFD700]", "")
+        clean = clean.replace("[#FF1493]", "").replace("[/#FF1493]", "")
+        clean = clean.replace("[#00FF7F]", "").replace("[/#00FF7F]", "")
+        logo_lines.append(clean)
+
+    logo_display = []
+    for line in logo_lines:
+        pad = max(0, (inner_width - LOGO_WIDTH) // 2)
+        logo_display.append(" " * pad + line)
+
+    separator = "\u2500" * inner_width
+
+    info_lines = [
+        f"  [bold #00D4FF]PlasmaAgent Interactive Chat[/bold #00D4FF]",
+        f"  [dim]User:[/dim]  [cyan]{username}[/cyan]",
+        f"  [dim]Model:[/dim] [cyan]{model}[/cyan]",
+        f"  [dim]Ollama:[/dim][cyan]{ollama_url}[/cyan]",
+        f"  [dim]Tools:[/dim] [green]{tools_count} loaded[/green]",
+        "",
+        "  [dim]Commands:[/dim]",
+        "    [cyan]exit/quit[/cyan]  - Leave chat",
+        "    [cyan]/clear[/cyan]    - Clear screen & chat",
+        "    [cyan]/reset[/cyan]    - Clear history only",
+        "    [cyan]/tools[/cyan]    - List available tools",
+        "    [cyan]/model[/cyan]    - List models (with ctx)",
+        "    [cyan]/model <n>[/cyan]- Switch model",
+    ]
+
+    all_content = logo_display + [""] + [separator] + [""] + info_lines
+
+    top_border = "\u256d" + "\u2500" * (box_width - 2) + "\u256e"
+    bot_border = "\u2570" + "\u2500" * (box_width - 2) + "\u256f"
+
+    lines = [top_border]
+    for content_line in all_content:
+        clean_len = len(content_line.replace("[bold #00D4FF]", "").replace("[/bold #00D4FF]", "")
+                         .replace("[dim]", "").replace("[/dim]", "")
+                         .replace("[cyan]", "").replace("[/cyan]", "")
+                         .replace("[green]", "").replace("[/green]", ""))
+        pad_right = max(0, inner_width - clean_len)
+        lines.append(f"\u2502  {content_line}{' ' * pad_right}\u2502")
+    lines.append(bot_border)
+
+    padding = max(0, (term_width - box_width) // 2)
+    centered = []
+    for line in lines:
+        centered.append(" " * padding + line)
+
+    return "\n".join(centered)
+
+
+def print_banner(model: str, ollama_url: str, username: str, tools_count: int) -> None:
+    console.print(_get_boxed_banner(model, ollama_url, username, tools_count))
 
 
 def print_tools() -> None:
@@ -87,8 +141,25 @@ async def _list_models(ollama: OllamaClient, current_model: str) -> None:
             name = m.get("name", "unknown")
             size_bytes = m.get("size", 0)
             size_gb = size_bytes / (1024 ** 3) if size_bytes else 0
+
+            ctx_info = ""
+            try:
+                details = m.get("details", {})
+                params = m.get("model_info", {})
+                ctx_key = None
+                for k in params:
+                    if "context_length" in k.lower():
+                        ctx_key = k
+                        break
+                if ctx_key:
+                    ctx_info = f" | ctx: {params[ctx_key]:,}"
+                else:
+                    ctx_info = " | ctx: 8,192 (default)"
+            except Exception:
+                ctx_info = " | ctx: 8,192"
+
             marker = " [bold green]\u2190 current[/bold green]" if name == current_model else ""
-            lines.append(f"[cyan]{name}[/cyan] ({size_gb:.1f} GB){marker}")
+            lines.append(f"[cyan]{name}[/cyan] ({size_gb:.1f} GB{ctx_info}){marker}")
         console.print(Panel("\n".join(lines), title="Available Models", border_style="#00D4FF"))
     except Exception as e:
         console.print(f"[red]Failed to list models: {e}[/red]")
@@ -115,7 +186,7 @@ async def _health_check(ollama: OllamaClient) -> bool:
     return await ollama.health_check()
 
 
-async def _chat_loop(orchestrator: AgentOrchestrator, username: str) -> None:
+async def _chat_loop(orchestrator: AgentOrchestrator, username: str, model: str, base_url: str) -> None:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.formatted_text import HTML
@@ -138,6 +209,13 @@ async def _chat_loop(orchestrator: AgentOrchestrator, username: str) -> None:
         if user_input.lower() in ("exit", "quit", "/exit", "/quit"):
             console.print("[yellow]Goodbye![/yellow]")
             break
+        if user_input == "/clear":
+            console.clear()
+            from plasmaagent.agent.tools import TOOL_REGISTRY
+            print_banner(model, base_url, username, len(TOOL_REGISTRY))
+            console.print("[green]Screen cleared. Chat reset.[/green]")
+            orchestrator.reset_history()
+            continue
         if user_input == "/reset":
             orchestrator.reset_history()
             console.print("[green]History cleared.[/green]")
@@ -166,7 +244,13 @@ async def _chat_loop(orchestrator: AgentOrchestrator, username: str) -> None:
                 _print_tool_call(call["name"], call["args"])
 
             for tr in response.tool_results:
-                _print_tool_result(tr["name"], tr["result"].success, tr["result"].output)
+                is_shell = tr["name"] in ("execute_shell", "open_app")
+                _print_tool_result(
+                    tr["name"],
+                    tr["result"].success,
+                    tr["result"].output,
+                    full_output=is_shell,
+                )
 
             if response.text:
                 console.print()
@@ -205,10 +289,9 @@ def start_chat(model: str | None = None, base_url: str = "http://localhost:11434
             console.print(f"[yellow]Warning: model '{ollama._model}' not found in Ollama.[/yellow]")
             console.print(f"[dim]Available: {', '.join(model_names)}[/dim]")
 
-        print_banner(ollama._model, base_url, username)
-        console.print(f"[dim]Loaded {len(TOOL_REGISTRY)} tools[/dim]")
+        print_banner(ollama._model, base_url, username, len(TOOL_REGISTRY))
 
         orchestrator = AgentOrchestrator(ollama=ollama)
-        await _chat_loop(orchestrator, username)
+        await _chat_loop(orchestrator, username, ollama._model, base_url)
 
     run_async(main())

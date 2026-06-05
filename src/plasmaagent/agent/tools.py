@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Awaitable
-from uuid import UUID
+from uuid import UUID, uuid4
 
 
 @dataclass(frozen=True)
@@ -19,13 +19,6 @@ class ToolResult:
 
 
 ToolHandler = Callable[..., Awaitable[ToolResult]]
-
-ALLOWED_DIRS = {
-    "documents": Path.home() / "Documents",
-    "desktop": Path.home() / "Desktop",
-    "downloads": Path.home() / "Downloads",
-    "project": Path.cwd(),
-}
 
 DANGEROUS_DIRS = {
     Path("C:/Windows"),
@@ -148,7 +141,7 @@ async def file_info(path: str) -> ToolResult:
 
 
 async def execute_shell(command: str, timeout: int = 300) -> ToolResult:
-    dangerous = ["rm -rf", "format", "del /s", "rmdir /s", "DROP TABLE", "DROP DATABASE", "shutdown"]
+    dangerous = ["rm -rf /", "format c:", "del /s /q c:\\", "rmdir /s /q c:\\", "DROP DATABASE", "shutdown /s"]
     for pattern in dangerous:
         if pattern.lower() in command.lower():
             return ToolResult(False, f"Dangerous command blocked: {pattern}")
@@ -161,18 +154,83 @@ async def execute_shell(command: str, timeout: int = 300) -> ToolResult:
             text=True,
             timeout=timeout,
         )
-        output = result.stdout
+        output = result.stdout or ""
         if result.stderr:
             output += f"\n[STDERR]\n{result.stderr}"
+        if not output.strip():
+            output = f"Exit code: {result.returncode}"
         return ToolResult(
             result.returncode == 0,
-            output or f"Exit code: {result.returncode}",
+            output.strip(),
             {"exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
         )
     except subprocess.TimeoutExpired:
         return ToolResult(False, f"Command timed out after {timeout}s")
     except Exception as e:
         return ToolResult(False, f"Execution failed: {e}")
+
+
+async def open_app(app_name: str, arguments: str = "") -> ToolResult:
+    try:
+        if sys.platform == "win32":
+            cmd = f"Start-Process '{app_name}'"
+            if arguments:
+                cmd += f" -ArgumentList '{arguments}'"
+            result = subprocess.run(
+                ["powershell", "-Command", cmd],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                return ToolResult(True, f"Opened: {app_name} {arguments}".strip())
+            return ToolResult(False, f"Failed to open {app_name}: {result.stderr}")
+        else:
+            cmd = ["xdg-open", app_name] if "://" in app_name or "/" in app_name else [app_name]
+            if arguments:
+                cmd.extend(arguments.split())
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return ToolResult(True, f"Opened: {app_name} {arguments}".strip())
+    except FileNotFoundError:
+        return ToolResult(False, f"Application not found: {app_name}")
+    except Exception as e:
+        return ToolResult(False, f"Failed to open app: {e}")
+
+
+async def cron_schedule(task_name: str, cron_expression: str, commands: list[str]) -> ToolResult:
+    try:
+        from plasmaagent.core.database import get_database
+        from plasmaagent.scheduling.service import SchedulingService
+
+        db = get_database()
+        await db.connect()
+        try:
+            task_id = uuid4()
+            payload = json.dumps({"commands": commands})
+            async with db.transaction() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        "INSERT INTO tasks (id, name, status, payload, created_at, updated_at) "
+                        "VALUES (%s, %s, 'PENDING', %s, NOW(), NOW())",
+                        (task_id, task_name, payload),
+                    )
+            service = SchedulingService(db)
+            result = await service.enable_schedule(
+                task_id=task_id,
+                cron_expression=cron_expression,
+            )
+            if result is None:
+                return ToolResult(False, f"Failed to schedule task '{task_name}'")
+            next_run = result.next_run_at
+            return ToolResult(
+                True,
+                f"Scheduled '{task_name}' with cron '{cron_expression}'. Next run: {next_run}",
+                {"task_id": str(task_id), "next_run": str(next_run)},
+            )
+        finally:
+            await db.disconnect()
+    except Exception as e:
+        return ToolResult(False, f"Failed to schedule: {e}")
 
 
 async def store_memory(content: str, memory_type: str = "fact", metadata: dict[str, Any] | None = None) -> ToolResult:
@@ -328,7 +386,7 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
     ),
     "execute_shell": ToolDefinition(
         name="execute_shell",
-        description="Execute a shell command (PowerShell on Windows, bash on Linux). Dangerous commands are blocked.",
+        description="Execute a shell command (PowerShell on Windows, bash on Linux). Dangerous commands are blocked. Returns full stdout/stderr output.",
         parameters={
             "type": "object",
             "properties": {
@@ -338,6 +396,33 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             "required": ["command"],
         },
         handler=execute_shell,
+    ),
+    "open_app": ToolDefinition(
+        name="open_app",
+        description="Open an application or URL. Examples: 'msedge', 'chrome', 'notepad', 'https://youtube.com', 'C:\\Program Files\\app.exe'. On Windows uses Start-Process.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "app_name": {"type": "string", "description": "Application name, path, or URL to open"},
+                "arguments": {"type": "string", "description": "Optional arguments (e.g., URL to open in browser, search query)", "default": ""},
+            },
+            "required": ["app_name"],
+        },
+        handler=open_app,
+    ),
+    "cron_schedule": ToolDefinition(
+        name="cron_schedule",
+        description="Schedule a recurring task using cron expression. Format: 'minute hour day month weekday'. Examples: '0 * * * *' (every hour), '0 9 * * 1' (every Monday 9am), '30 8 * * *' (daily 8:30am).",
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_name": {"type": "string", "description": "Name for the scheduled task"},
+                "cron_expression": {"type": "string", "description": "Cron expression (5 fields: min hour day month weekday)"},
+                "commands": {"type": "array", "items": {"type": "string"}, "description": "List of shell commands to execute"},
+            },
+            "required": ["task_name", "cron_expression", "commands"],
+        },
+        handler=cron_schedule,
     ),
     "store_memory": ToolDefinition(
         name="store_memory",
