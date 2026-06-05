@@ -1,4 +1,5 @@
-from plasmaagent.ai.templates.learner import TemplateLearner
+# Disabled modules that require psycopg (PostgreSQL-specific)
+# from plasmaagent.ai.templates.learner import TemplateLearner
 from plasmaagent.ai.templates.models import (
     LearnedTemplate,
     LearningReport,
@@ -8,7 +9,7 @@ from plasmaagent.ai.templates.models import (
     TemplateVersion,
     TemplateVersionCreate,
 )
-from plasmaagent.ai.templates.versioning import TemplateVersionService
+# from plasmaagent.ai.templates.versioning import TemplateVersionService
 from plasmaagent.ai.templates.ab_testing import (
     ABTest,
     ABTestCreate,
@@ -16,28 +17,23 @@ from plasmaagent.ai.templates.ab_testing import (
     ABTestStats,
     ABTestAnalysis,
 )
-from plasmaagent.ai.templates.ab_test_service import ABTestService
+# from plasmaagent.ai.templates.ab_test_service import ABTestService
 from plasmaagent.ai.templates.retirement import (
     TemplateRetirement,
     TemplateRetirementCreate,
     RetirementScanRequest,
     RetirementScanReport,
 )
-from plasmaagent.ai.templates.retirement_service import RetirementService
+# from plasmaagent.ai.templates.retirement_service import RetirementService
 from plasmaagent.ai.templates.auto_generator import (
     TemplateCandidateCreate,
     TemplateCandidate as AutoTemplateCandidate,
     CandidateDetectionRequest,
     CandidateDetectionReport,
 )
-from plasmaagent.ai.templates.auto_generator_service import AutoTemplateGenerator
+# from plasmaagent.ai.templates.auto_generator_service import AutoTemplateGenerator
 
 __all__ = [
-    "TemplateLearner",
-    "TemplateVersionService",
-    "ABTestService",
-    "RetirementService",
-    "AutoTemplateGenerator",
     "LearnedTemplate",
     "LearningReport",
     "RollbackReport",

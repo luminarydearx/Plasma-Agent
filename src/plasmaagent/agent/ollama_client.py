@@ -7,6 +7,12 @@ class OllamaClient:
         self._base_url = base_url
         self._model = model
 
+    async def set_model(self, model: str) -> None:
+        self._model = model
+
+    def get_model(self) -> str:
+        return self._model
+
     async def generate(self, prompt: str, system: str = "", temperature: float = 0.3) -> str:
         payload = {
             "model": self._model,
