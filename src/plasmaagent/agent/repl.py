@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import html
 import os
+import signal
+import sys
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -104,7 +106,8 @@ def print_banner(model: str, base_url: str, username: str, tools_count: int) -> 
         f"    [cyan]/model[/cyan]    - List models (with ctx)\n"
         f"    [cyan]/model <n>[/cyan]- Switch model (saved for next session)\n"
         f"    [cyan]/perms[/cyan]    - View saved permissions\n"
-        f"    [cyan]/perms reset[/cyan] - Reset all permissions"
+        f"    [cyan]/perms reset[/cyan] - Reset all permissions\n"
+        f"    [cyan]Ctrl+C[/cyan]    - Cancel current operation"
     )
 
     console.print(Panel(centered + "\n\n" + info, border_style="blue", expand=True))
@@ -189,6 +192,7 @@ async def _chat_loop(orchestrator: "AgentOrchestrator", username: str, base_url:
     
     status_handle: Status | None = None
     spinner_active = False
+    cancel_requested = False
     
     def stop_spinner() -> None:
         nonlocal status_handle, spinner_active
@@ -199,12 +203,18 @@ async def _chat_loop(orchestrator: "AgentOrchestrator", username: str, base_url:
     def start_spinner() -> None:
         nonlocal status_handle, spinner_active
         if not spinner_active:
-            status_handle = console.status("[bold cyan]⠋ Thinking...[/bold cyan]", spinner="dots")
+            status_handle = console.status("[bold cyan]Thinking...[/bold cyan]", spinner="dots")
             status_handle.start()
             spinner_active = True
     
+    def request_cancel() -> None:
+        nonlocal cancel_requested
+        cancel_requested = True
+        stop_spinner()
+    
     orchestrator._on_permission_needed = stop_spinner
     orchestrator._on_permission_done = start_spinner
+    orchestrator._cancel_callback = request_cancel
 
     while True:
         model = orchestrator._ollama._model
@@ -261,10 +271,42 @@ async def _chat_loop(orchestrator: "AgentOrchestrator", username: str, base_url:
             continue
 
         start = time.time()
+        cancel_requested = False
+        
         try:
             start_spinner()
-            response = await orchestrator.chat(user_input)
+            
+            async def chat_with_cancel():
+                nonlocal cancel_requested
+                task = asyncio.create_task(orchestrator.chat(user_input))
+                
+                while not task.done():
+                    if cancel_requested:
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        return None
+                    await asyncio.sleep(0.1)
+                
+                return await task
+            
+            response = await chat_with_cancel()
             stop_spinner()
+            
+            if cancel_requested:
+                console.print("[yellow]Operation cancelled.[/yellow]")
+                continue
+                
+        except asyncio.CancelledError:
+            stop_spinner()
+            console.print("[yellow]Operation cancelled.[/yellow]")
+            continue
+        except KeyboardInterrupt:
+            stop_spinner()
+            console.print("[yellow]Operation cancelled.[/yellow]")
+            continue
         except Exception as e:
             stop_spinner()
             elapsed = time.time() - start

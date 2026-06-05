@@ -2,17 +2,15 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from psycopg import AsyncConnection
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
+from sqlalchemy import select, func, delete, and_, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from plasmaagent.core.database import Database
+from plasmaagent.core.schema import ExecutionLog
 
 
 class ExecutionMetricsTracker:
     """Track and analyze execution metrics for self-improvement."""
-
-    EVENT_TYPE = "execution_metric"
 
     def __init__(self, db: Database, retention_days: int = 30):
         self._db = db
@@ -28,47 +26,47 @@ class ExecutionMetricsTracker:
         task_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        payload = {
-            "template_name": template_name,
-            "success": success,
-            "execution_time_ms": execution_time_ms,
-            "error_message": error_message,
-            "commands": commands or [],
-            "task_id": str(task_id) if task_id else None,
-            "metadata": metadata or {},
-        }
-
-        async with self._db.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO telemetry (event_type, payload)
-                VALUES (%s, %s)
-                """,
-                (self.EVENT_TYPE, Jsonb(payload)),
+        async with self._db.session() as session:
+            log = ExecutionLog(
+                task_id=task_id,
+                status="SUCCESS" if success else "FAILED",
+                execution_time_ms=execution_time_ms,
+                error_message=error_message,
+                commands=commands or [],
+                metadata={
+                    "template_name": template_name,
+                    **(metadata or {}),
+                },
             )
+            session.add(log)
+            await session.commit()
 
     async def get_template_stats(self, template_name: str) -> dict[str, Any]:
-        async with self._db.transaction() as conn:
-            cursor = conn.cursor(row_factory=dict_row)
-            await cursor.execute(
-                """
-                SELECT 
-                    COUNT(*) as total_executions,
-                    COUNT(*) FILTER (WHERE (payload->>'success')::boolean = true) as successful_executions,
-                    COUNT(*) FILTER (WHERE (payload->>'success')::boolean = false) as failed_executions,
-                    AVG((payload->>'execution_time_ms')::integer) as avg_execution_time_ms,
-                    MIN((payload->>'execution_time_ms')::integer) as min_execution_time_ms,
-                    MAX((payload->>'execution_time_ms')::integer) as max_execution_time_ms
-                FROM telemetry
-                WHERE event_type = %s
-                  AND payload->>'template_name' = %s
-                  AND timestamp >= NOW() - INTERVAL '%s days'
-                """,
-                (self.EVENT_TYPE, template_name, self._retention_days),
+        async with self._db.session() as session:
+            cutoff_date = datetime.utcnow() - timedelta(days=self._retention_days)
+            
+            stmt = select(
+                func.count(ExecutionLog.id).label("total_executions"),
+                func.sum(
+                    func.case((ExecutionLog.status == "SUCCESS", 1), else_=0)
+                ).label("successful_executions"),
+                func.sum(
+                    func.case((ExecutionLog.status == "FAILED", 1), else_=0)
+                ).label("failed_executions"),
+                func.avg(ExecutionLog.execution_time_ms).label("avg_execution_time_ms"),
+                func.min(ExecutionLog.execution_time_ms).label("min_execution_time_ms"),
+                func.max(ExecutionLog.execution_time_ms).label("max_execution_time_ms"),
+            ).where(
+                and_(
+                    ExecutionLog.created_at >= cutoff_date,
+                    ExecutionLog.metadata["template_name"].as_string() == template_name,
+                )
             )
-            result = await cursor.fetchone()
-
-            if not result or result["total_executions"] == 0:
+            
+            result = await session.execute(stmt)
+            row = result.first()
+            
+            if not row or row.total_executions == 0:
                 return {
                     "template_name": template_name,
                     "total_executions": 0,
@@ -81,127 +79,124 @@ class ExecutionMetricsTracker:
                 }
 
             success_rate = (
-                result["successful_executions"] / result["total_executions"]
-                if result["total_executions"] > 0
+                row.successful_executions / row.total_executions
+                if row.total_executions > 0
                 else 0.0
             )
 
             return {
                 "template_name": template_name,
-                "total_executions": result["total_executions"],
-                "successful_executions": result["successful_executions"],
-                "failed_executions": result["failed_executions"],
+                "total_executions": row.total_executions,
+                "successful_executions": row.successful_executions or 0,
+                "failed_executions": row.failed_executions or 0,
                 "success_rate": round(success_rate, 2),
-                "avg_execution_time_ms": int(result["avg_execution_time_ms"] or 0),
-                "min_execution_time_ms": result["min_execution_time_ms"] or 0,
-                "max_execution_time_ms": result["max_execution_time_ms"] or 0,
+                "avg_execution_time_ms": int(row.avg_execution_time_ms or 0),
+                "min_execution_time_ms": row.min_execution_time_ms or 0,
+                "max_execution_time_ms": row.max_execution_time_ms or 0,
             }
 
     async def get_all_template_stats(self) -> list[dict[str, Any]]:
-        async with self._db.transaction() as conn:
-            cursor = conn.cursor(row_factory=dict_row)
-            await cursor.execute(
-                """
-                SELECT DISTINCT payload->>'template_name' as template_name
-                FROM telemetry
-                WHERE event_type = %s
-                  AND timestamp >= NOW() - INTERVAL '%s days'
-                """,
-                (self.EVENT_TYPE, self._retention_days),
-            )
-            results = await cursor.fetchall()
-
+        async with self._db.session() as session:
+            cutoff_date = datetime.utcnow() - timedelta(days=self._retention_days)
+            
+            stmt = select(
+                ExecutionLog.metadata["template_name"].as_string().label("template_name")
+            ).where(
+                ExecutionLog.created_at >= cutoff_date
+            ).distinct()
+            
+            result = await session.execute(stmt)
+            template_names = [row.template_name for row in result if row.template_name]
+            
             stats = []
-            for row in results:
-                template_name = row["template_name"]
-                if template_name:
-                    template_stats = await self.get_template_stats(template_name)
-                    stats.append(template_stats)
+            for template_name in template_names:
+                template_stats = await self.get_template_stats(template_name)
+                stats.append(template_stats)
 
             return stats
 
     async def get_failure_patterns(
         self, template_name: str | None = None, limit: int = 10
     ) -> list[dict[str, Any]]:
-        async with self._db.transaction() as conn:
-            cursor = conn.cursor(row_factory=dict_row)
-
+        async with self._db.session() as session:
+            cutoff_date = datetime.utcnow() - timedelta(days=self._retention_days)
+            
+            conditions = [
+                ExecutionLog.status == "FAILED",
+                ExecutionLog.created_at >= cutoff_date,
+                ExecutionLog.error_message.isnot(None),
+            ]
+            
             if template_name:
-                await cursor.execute(
-                    """
-                    SELECT 
-                        payload->>'error_message' as error_message,
-                        COUNT(*) as occurrence_count,
-                        payload->>'template_name' as template_name
-                    FROM telemetry
-                    WHERE event_type = %s
-                      AND (payload->>'success')::boolean = false
-                      AND payload->>'template_name' = %s
-                      AND payload->>'error_message' IS NOT NULL
-                      AND timestamp >= NOW() - INTERVAL '%s days'
-                    GROUP BY payload->>'error_message', payload->>'template_name'
-                    ORDER BY occurrence_count DESC
-                    LIMIT %s
-                    """,
-                    (self.EVENT_TYPE, template_name, self._retention_days, limit),
+                conditions.append(
+                    ExecutionLog.metadata["template_name"].as_string() == template_name
                 )
-            else:
-                await cursor.execute(
-                    """
-                    SELECT 
-                        payload->>'error_message' as error_message,
-                        COUNT(*) as occurrence_count,
-                        payload->>'template_name' as template_name
-                    FROM telemetry
-                    WHERE event_type = %s
-                      AND (payload->>'success')::boolean = false
-                      AND payload->>'error_message' IS NOT NULL
-                      AND timestamp >= NOW() - INTERVAL '%s days'
-                    GROUP BY payload->>'error_message', payload->>'template_name'
-                    ORDER BY occurrence_count DESC
-                    LIMIT %s
-                    """,
-                    (self.EVENT_TYPE, self._retention_days, limit),
-                )
-
-            results = await cursor.fetchall()
-            return [dict(row) for row in results]
+            
+            stmt = select(
+                ExecutionLog.error_message.label("error_message"),
+                func.count(ExecutionLog.id).label("occurrence_count"),
+                ExecutionLog.metadata["template_name"].as_string().label("template_name"),
+            ).where(
+                and_(*conditions)
+            ).group_by(
+                ExecutionLog.error_message,
+                ExecutionLog.metadata["template_name"].as_string(),
+            ).order_by(
+                func.count(ExecutionLog.id).desc()
+            ).limit(limit)
+            
+            result = await session.execute(stmt)
+            return [
+                {
+                    "error_message": row.error_message,
+                    "occurrence_count": row.occurrence_count,
+                    "template_name": row.template_name,
+                }
+                for row in result
+            ]
 
     async def get_slow_executions(
         self, threshold_ms: int = 5000, limit: int = 10
     ) -> list[dict[str, Any]]:
-        async with self._db.transaction() as conn:
-            cursor = conn.cursor(row_factory=dict_row)
-            await cursor.execute(
-                """
-                SELECT 
-                    payload->>'template_name' as template_name,
-                    (payload->>'execution_time_ms')::integer as execution_time_ms,
-                    payload->'commands' as commands,
-                    timestamp
-                FROM telemetry
-                WHERE event_type = %s
-                  AND (payload->>'execution_time_ms')::integer > %s
-                  AND timestamp >= NOW() - INTERVAL '%s days'
-                ORDER BY (payload->>'execution_time_ms')::integer DESC
-                LIMIT %s
-                """,
-                (self.EVENT_TYPE, threshold_ms, self._retention_days, limit),
-            )
-            results = await cursor.fetchall()
-            return [dict(row) for row in results]
+        async with self._db.session() as session:
+            cutoff_date = datetime.utcnow() - timedelta(days=self._retention_days)
+            
+            stmt = select(
+                ExecutionLog.metadata["template_name"].as_string().label("template_name"),
+                ExecutionLog.execution_time_ms,
+                ExecutionLog.commands,
+                ExecutionLog.created_at.label("timestamp"),
+            ).where(
+                and_(
+                    ExecutionLog.execution_time_ms > threshold_ms,
+                    ExecutionLog.created_at >= cutoff_date,
+                )
+            ).order_by(
+                ExecutionLog.execution_time_ms.desc()
+            ).limit(limit)
+            
+            result = await session.execute(stmt)
+            return [
+                {
+                    "template_name": row.template_name,
+                    "execution_time_ms": row.execution_time_ms,
+                    "commands": row.commands,
+                    "timestamp": row.timestamp,
+                }
+                for row in result
+            ]
 
     async def cleanup_old_metrics(self) -> int:
-        async with self._db.transaction() as conn:
-            cursor = await conn.execute(
-                """
-                DELETE FROM telemetry
-                WHERE event_type = %s
-                  AND timestamp < NOW() - INTERVAL '%s days'
-                """,
-                (self.EVENT_TYPE, self._retention_days),
+        async with self._db.session() as session:
+            cutoff_date = datetime.utcnow() - timedelta(days=self._retention_days)
+            
+            stmt = delete(ExecutionLog).where(
+                ExecutionLog.created_at < cutoff_date
             )
-            return cursor.rowcount
+            
+            result = await session.execute(stmt)
+            await session.commit()
+            return result.rowcount
 
     async def get_top_templates(self, limit: int = 5) -> list[dict[str, Any]]:
         all_stats = await self.get_all_template_stats()
