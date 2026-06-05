@@ -12,6 +12,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.table import Table
+from rich.status import Status
 
 if TYPE_CHECKING:
     from plasmaagent.agent.ollama_client import OllamaClient
@@ -185,6 +186,25 @@ async def _chat_loop(orchestrator: "AgentOrchestrator", username: str, base_url:
         return
 
     session: Any = PromptSession(history=InMemoryHistory())
+    
+    status_handle: Status | None = None
+    spinner_active = False
+    
+    def stop_spinner() -> None:
+        nonlocal status_handle, spinner_active
+        if spinner_active and status_handle is not None:
+            status_handle.stop()
+            spinner_active = False
+    
+    def start_spinner() -> None:
+        nonlocal status_handle, spinner_active
+        if not spinner_active:
+            status_handle = console.status("[bold cyan]⠋ Thinking...[/bold cyan]", spinner="dots")
+            status_handle.start()
+            spinner_active = True
+    
+    orchestrator._on_permission_needed = stop_spinner
+    orchestrator._on_permission_done = start_spinner
 
     while True:
         model = orchestrator._ollama._model
@@ -242,9 +262,11 @@ async def _chat_loop(orchestrator: "AgentOrchestrator", username: str, base_url:
 
         start = time.time()
         try:
-            with console.status("[bold cyan]⠋ Thinking...[/bold cyan]", spinner="dots"):
-                response = await orchestrator.chat(user_input)
+            start_spinner()
+            response = await orchestrator.chat(user_input)
+            stop_spinner()
         except Exception as e:
+            stop_spinner()
             elapsed = time.time() - start
             console.print(f"[red]Error: {e}[/red]")
             console.print("[dim]⏱ {:.1f}s[/dim]".format(elapsed))

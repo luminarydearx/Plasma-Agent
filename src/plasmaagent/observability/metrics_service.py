@@ -3,9 +3,11 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from psycopg.rows import dict_row
+from sqlalchemy import select, func, case, and_, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from plasmaagent.core.database import Database, get_database
+from plasmaagent.core.schema import Task, TaskStep, ExecutionLog, TemplateMetric
 from plasmaagent.observability.models import (
     ExecutionMetrics,
     MetricsQuery,
@@ -26,85 +28,64 @@ class MetricsAggregationService:
         query = query or MetricsQuery()
         start_time, end_time = query.get_time_bounds()
 
-        where_clauses: list[str] = []
-        params: list[Any] = []
+        async with self._db.session() as session:
+            stmt = select(TaskStep).where(
+                TaskStep.finished_at.isnot(None),
+                TaskStep.duration_ms.isnot(None),
+            )
 
-        if start_time is not None:
-            where_clauses.append("ts.finished_at >= %s")
-            params.append(start_time)
-        if end_time is not None:
-            where_clauses.append("ts.finished_at <= %s")
-            params.append(end_time)
-        if query.task_id is not None:
-            where_clauses.append("ts.task_id = %s")
-            params.append(query.task_id)
-        where_clauses.append("ts.finished_at IS NOT NULL")
-        where_clauses.append("ts.duration_ms IS NOT NULL")
+            if start_time is not None:
+                stmt = stmt.where(TaskStep.finished_at >= start_time)
+            if end_time is not None:
+                stmt = stmt.where(TaskStep.finished_at <= end_time)
+            if query.task_id is not None:
+                stmt = stmt.where(TaskStep.task_id == str(query.task_id))
 
-        where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
+            result = await session.execute(stmt)
+            steps = result.scalars().all()
 
-        sql = f"""
-            SELECT
-                COUNT(*) AS total_executions,
-                COUNT(*) FILTER (WHERE ts.status = 'COMPLETED') AS successful,
-                COUNT(*) FILTER (WHERE ts.status = 'FAILED') AS failed,
-                COALESCE(AVG(ts.duration_ms), 0) AS avg_duration,
-                COALESCE(MIN(ts.duration_ms), 0) AS min_duration,
-                COALESCE(MAX(ts.duration_ms), 0) AS max_duration,
-                COALESCE(
-                    PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ts.duration_ms),
-                    0
-                ) AS p50_duration,
-                COALESCE(
-                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ts.duration_ms),
-                    0
-                ) AS p95_duration,
-                COALESCE(
-                    PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ts.duration_ms),
-                    0
-                ) AS p99_duration,
-                MIN(ts.finished_at) AS first_finished,
-                MAX(ts.finished_at) AS last_finished
-            FROM task_steps ts
-            WHERE {where_sql}
-        """
+            if not steps:
+                return ExecutionMetrics()
 
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(sql, tuple(params))
-                row = await cur.fetchone()
-                if row is None:
-                    return ExecutionMetrics()
+            total = len(steps)
+            successful = sum(1 for s in steps if s.status == "COMPLETED")
+            failed = sum(1 for s in steps if s.status == "FAILED")
+            success_rate = (successful / total) if total > 0 else 0.0
 
-                total = int(row["total_executions"])
-                successful = int(row["successful"])
-                failed = int(row["failed"])
-                success_rate = (successful / total) if total > 0 else 0.0
+            durations = [s.duration_ms for s in steps if s.duration_ms is not None]
+            avg_duration = sum(durations) / len(durations) if durations else 0.0
+            min_duration = min(durations) if durations else 0
+            max_duration = max(durations) if durations else 0
 
-                throughput = 0.0
-                if total > 0:
-                    first_finished = row["first_finished"]
-                    last_finished = row["last_finished"]
-                    if first_finished and last_finished:
-                        span_seconds = (last_finished - first_finished).total_seconds()
-                        if span_seconds > 0:
-                            throughput = (total / span_seconds) * 60.0
-                        else:
-                            throughput = float(total)
+            sorted_durations = sorted(durations)
+            p50_duration = sorted_durations[len(sorted_durations) // 2] if sorted_durations else 0
+            p95_duration = sorted_durations[int(len(sorted_durations) * 0.95)] if sorted_durations else 0
+            p99_duration = sorted_durations[int(len(sorted_durations) * 0.99)] if sorted_durations else 0
 
-                return ExecutionMetrics(
-                    total_executions=total,
-                    successful_executions=successful,
-                    failed_executions=failed,
-                    success_rate=round(success_rate, 4),
-                    avg_duration_ms=round(float(row["avg_duration"]), 2),
-                    min_duration_ms=float(row["min_duration"]),
-                    max_duration_ms=float(row["max_duration"]),
-                    p50_duration_ms=round(float(row["p50_duration"]), 2),
-                    p95_duration_ms=round(float(row["p95_duration"]), 2),
-                    p99_duration_ms=round(float(row["p99_duration"]), 2),
-                    throughput_per_minute=round(throughput, 4),
-                )
+            first_finished = min(s.finished_at for s in steps if s.finished_at)
+            last_finished = max(s.finished_at for s in steps if s.finished_at)
+
+            throughput = 0.0
+            if total > 0 and first_finished and last_finished:
+                span_seconds = (last_finished - first_finished).total_seconds()
+                if span_seconds > 0:
+                    throughput = (total / span_seconds) * 60.0
+                else:
+                    throughput = float(total)
+
+            return ExecutionMetrics(
+                total_executions=total,
+                successful_executions=successful,
+                failed_executions=failed,
+                success_rate=round(success_rate, 4),
+                avg_duration_ms=round(float(avg_duration), 2),
+                min_duration_ms=float(min_duration),
+                max_duration_ms=float(max_duration),
+                p50_duration_ms=round(float(p50_duration), 2),
+                p95_duration_ms=round(float(p95_duration), 2),
+                p99_duration_ms=round(float(p99_duration), 2),
+                throughput_per_minute=round(throughput, 4),
+            )
 
     async def get_task_metrics(
         self,
@@ -113,55 +94,42 @@ class MetricsAggregationService:
     ) -> Optional[TaskMetrics]:
         query = query or MetricsQuery()
 
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    "SELECT id, name, created_at FROM tasks WHERE id = %s",
-                    (task_id,),
-                )
-                task_row = await cur.fetchone()
-                if task_row is None:
-                    return None
+        async with self._db.session() as session:
+            stmt = select(Task).where(Task.id == str(task_id))
+            result = await session.execute(stmt)
+            task = result.scalar_one_or_none()
 
-                task_name = str(task_row["name"])
+            if task is None:
+                return None
 
-                await cur.execute(
-                    """SELECT template_name
-                       FROM template_metrics
-                       WHERE template_name = %s
-                       LIMIT 1""",
-                    (task_name,),
-                )
-                template_row = await cur.fetchone()
-                template_name = (
-                    str(template_row["template_name"])
-                    if template_row is not None
-                    else None
-                )
+            task_name = task.name
 
-                await cur.execute(
-                    """SELECT MIN(finished_at) AS first_exec,
-                              MAX(finished_at) AS last_exec
-                       FROM task_steps
-                       WHERE task_id = %s AND finished_at IS NOT NULL""",
-                    (task_id,),
-                )
-                time_row = await cur.fetchone()
+            stmt = select(TemplateMetric).where(TemplateMetric.template_id == task_name).limit(1)
+            result = await session.execute(stmt)
+            template_metric = result.scalar_one_or_none()
+            template_name = task_name if template_metric else None
 
-                task_query = MetricsQuery(
-                    time_range=query.time_range,
-                    task_id=task_id,
-                    start_time=query.start_time,
-                    end_time=query.end_time,
-                )
+            stmt = select(TaskStep).where(
+                TaskStep.task_id == str(task_id),
+                TaskStep.finished_at.isnot(None),
+            )
+            result = await session.execute(stmt)
+            steps = result.scalars().all()
+
+            first_exec = None
+            last_exec = None
+            if steps:
+                first_exec = min(s.finished_at for s in steps if s.finished_at)
+                last_exec = max(s.finished_at for s in steps if s.finished_at)
+
+            task_query = MetricsQuery(
+                time_range=query.time_range,
+                task_id=task_id,
+                start_time=query.start_time,
+                end_time=query.end_time,
+            )
 
         execution = await self.get_execution_metrics(task_query)
-
-        first_exec = None
-        last_exec = None
-        if time_row is not None:
-            first_exec = time_row["first_exec"]
-            last_exec = time_row["last_exec"]
 
         return TaskMetrics(
             task_id=task_id,
@@ -179,38 +147,30 @@ class MetricsAggregationService:
         start = time.perf_counter()
         query = query or MetricsQuery()
 
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    """SELECT
-                         COUNT(*) AS total,
-                         COUNT(*) FILTER (WHERE status = 'COMPLETED') AS completed,
-                         COUNT(*) FILTER (WHERE status = 'FAILED') AS failed,
-                         COUNT(*) FILTER (WHERE status = 'PENDING') AS pending,
-                         COUNT(*) FILTER (WHERE status = 'RUNNING') AS running,
-                         COUNT(*) FILTER (WHERE status = 'CANCELLED') AS cancelled
-                       FROM tasks"""
-                )
-                task_counts = await cur.fetchone()
-                if task_counts is None:
-                    task_counts = {
-                        "total": 0,
-                        "completed": 0,
-                        "failed": 0,
-                        "pending": 0,
-                        "running": 0,
-                        "cancelled": 0,
-                    }
+        async with self._db.session() as session:
+            stmt = select(
+                func.count(Task.id).label("total"),
+                func.sum(case((Task.status == "COMPLETED", 1), else_=0)).label("completed"),
+                func.sum(case((Task.status == "FAILED", 1), else_=0)).label("failed"),
+                func.sum(case((Task.status == "PENDING", 1), else_=0)).label("pending"),
+                func.sum(case((Task.status == "RUNNING", 1), else_=0)).label("running"),
+                func.sum(case((Task.status == "CANCELLED", 1), else_=0)).label("cancelled"),
+            )
+            result = await session.execute(stmt)
+            row = result.one()
 
-                await cur.execute(
-                    "SELECT COUNT(DISTINCT template_name) AS cnt FROM template_metrics"
-                )
-                templates_row = await cur.fetchone()
-                unique_templates = (
-                    int(templates_row["cnt"])
-                    if templates_row and templates_row["cnt"] is not None
-                    else 0
-                )
+            task_counts = {
+                "total": int(row.total or 0),
+                "completed": int(row.completed or 0),
+                "failed": int(row.failed or 0),
+                "pending": int(row.pending or 0),
+                "running": int(row.running or 0),
+                "cancelled": int(row.cancelled or 0),
+            }
+
+            stmt = select(func.count(func.distinct(TemplateMetric.template_id)))
+            result = await session.execute(stmt)
+            unique_templates = result.scalar() or 0
 
         execution = await self.get_execution_metrics(query)
         top_templates = await self.get_top_templates(limit=5)
@@ -218,12 +178,12 @@ class MetricsAggregationService:
 
         elapsed = (time.perf_counter() - start) * 1000.0
 
-        total = int(task_counts["total"])
-        completed = int(task_counts["completed"])
-        failed = int(task_counts["failed"])
-        pending = int(task_counts["pending"])
-        running = int(task_counts["running"])
-        cancelled = int(task_counts["cancelled"])
+        total = task_counts["total"]
+        completed = task_counts["completed"]
+        failed = task_counts["failed"]
+        pending = task_counts["pending"]
+        running = task_counts["running"]
+        cancelled = task_counts["cancelled"]
         active = running + pending
 
         return SystemMetrics(
@@ -235,91 +195,77 @@ class MetricsAggregationService:
             running_tasks=running,
             cancelled_tasks=cancelled,
             overall_execution=execution,
-            unique_templates_used=unique_templates,
+            unique_templates_used=int(unique_templates),
             top_templates=top_templates,
             failure_patterns=failure_patterns,
             query_time_ms=round(elapsed, 2),
         )
 
     async def get_top_templates(self, limit: int = 10) -> list[dict[str, Any]]:
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    """SELECT
-                         template_name,
-                         usage_count,
-                         success_count,
-                         failure_count,
-                         ROUND(avg_confidence, 4) AS avg_confidence,
-                         CASE WHEN usage_count > 0
-                              THEN ROUND(
-                                  (success_count::numeric / usage_count::numeric), 4
-                              )
-                              ELSE 0
-                         END AS success_rate
-                       FROM template_metrics
-                       WHERE usage_count > 0
-                       ORDER BY usage_count DESC
-                       LIMIT %s""",
-                    (limit,),
+        async with self._db.session() as session:
+            stmt = (
+                select(
+                    TemplateMetric.template_id,
+                    func.count(TemplateMetric.id).label("usage_count"),
+                    func.sum(case((TemplateMetric.success == 1, 1), else_=0)).label("success_count"),
+                    func.sum(case((TemplateMetric.success == 0, 1), else_=0)).label("failure_count"),
+                    func.avg(TemplateMetric.execution_time_ms).label("avg_confidence"),
                 )
-                rows = await cur.fetchall()
-                return [
-                    {
-                        "template_name": str(row["template_name"]),
-                        "usage_count": int(row["usage_count"]),
-                        "success_count": int(row["success_count"]),
-                        "failure_count": int(row["failure_count"]),
-                        "avg_confidence": float(row["avg_confidence"]),
-                        "success_rate": float(row["success_rate"]),
-                    }
-                    for row in rows
-                ]
+                .where(TemplateMetric.execution_time_ms > 0)
+                .group_by(TemplateMetric.template_id)
+                .order_by(func.count(TemplateMetric.id).desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+
+            return [
+                {
+                    "template_name": str(row.template_id),
+                    "usage_count": int(row.usage_count),
+                    "success_count": int(row.success_count or 0),
+                    "failure_count": int(row.failure_count or 0),
+                    "avg_confidence": float(row.avg_confidence or 0),
+                    "success_rate": round(float(row.success_count or 0) / float(row.usage_count), 4) if row.usage_count > 0 else 0.0,
+                }
+                for row in rows
+            ]
 
     async def get_failure_patterns(self, limit: int = 10) -> list[dict[str, Any]]:
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    """SELECT
-                         el.message,
-                         COUNT(*) AS occurrences,
-                         COUNT(DISTINCT el.task_id) AS affected_tasks,
-                         MAX(el.timestamp) AS last_occurred
-                       FROM execution_logs el
-                       WHERE el.log_level = 'ERROR'
-                       GROUP BY el.message
-                       ORDER BY occurrences DESC
-                       LIMIT %s""",
-                    (limit,),
+        async with self._db.session() as session:
+            stmt = (
+                select(
+                    ExecutionLog.message,
+                    func.count(ExecutionLog.id).label("occurrences"),
+                    func.count(func.distinct(ExecutionLog.task_id)).label("affected_tasks"),
+                    func.max(ExecutionLog.timestamp).label("last_occurred"),
                 )
-                rows = await cur.fetchall()
-                return [
-                    {
-                        "message": str(row["message"]),
-                        "occurrences": int(row["occurrences"]),
-                        "affected_tasks": int(row["affected_tasks"]),
-                        "last_occurred": row["last_occurred"],
-                    }
-                    for row in rows
-                ]
+                .where(ExecutionLog.log_level == "ERROR")
+                .group_by(ExecutionLog.message)
+                .order_by(func.count(ExecutionLog.id).desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+
+            return [
+                {
+                    "message": str(row.message),
+                    "occurrences": int(row.occurrences),
+                    "affected_tasks": int(row.affected_tasks),
+                    "last_occurred": row.last_occurred,
+                }
+                for row in rows
+            ]
 
     async def get_active_task_count(self) -> int:
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    """SELECT COUNT(*) AS cnt
-                       FROM tasks
-                       WHERE status IN ('PENDING', 'RUNNING')"""
-                )
-                row = await cur.fetchone()
-                return int(row["cnt"]) if row and row["cnt"] is not None else 0
+        async with self._db.session() as session:
+            stmt = select(func.count(Task.id)).where(Task.status.in_(["PENDING", "RUNNING"]))
+            result = await session.execute(stmt)
+            return result.scalar() or 0
 
     async def get_tasks_by_status(self, status: str) -> int:
-        async with self._db.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                await cur.execute(
-                    "SELECT COUNT(*) AS cnt FROM tasks WHERE status = %s",
-                    (status,),
-                )
-                row = await cur.fetchone()
-                return int(row["cnt"]) if row and row["cnt"] is not None else 0
+        async with self._db.session() as session:
+            stmt = select(func.count(Task.id)).where(Task.status == status)
+            result = await session.execute(stmt)
+            return result.scalar() or 0

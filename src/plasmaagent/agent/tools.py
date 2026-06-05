@@ -696,6 +696,49 @@ async def web_scrape(url: str, max_chars: int = 10000) -> ToolResult:
         return ToolResult(False, f"Web scrape failed: {e}")
 
 
+
+async def security_audit(project_path: str, file_extensions: list[str] | None = None) -> ToolResult:
+    try:
+        from plasmaagent.security.audit_tool import SecurityAuditor
+
+        auditor = SecurityAuditor()
+        report = await auditor.audit_project(project_path, file_extensions)
+        
+        data = report.to_dict()
+        
+        output_lines = [
+            f"🔍 Security Audit Report",
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"Project: {report.project_path}",
+            f"Files Scanned: {report.total_files}",
+            f"Security Score: {report.score:.1f}/100",
+            f"Vulnerabilities Found: {len(report.vulnerabilities)}",
+            "",
+            f"By Severity:",
+        ]
+        
+        by_severity = data["by_severity"]
+        output_lines.append(f"  • CRITICAL: {by_severity['critical']}")
+        output_lines.append(f"  • HIGH: {by_severity['high']}")
+        output_lines.append(f"  • MEDIUM: {by_severity['medium']}")
+        output_lines.append(f"  • LOW: {by_severity['low']}")
+        
+        if report.vulnerabilities:
+            output_lines.append("")
+            output_lines.append("Top Vulnerabilities:")
+            for i, vuln in enumerate(report.vulnerabilities[:10], start=1):
+                output_lines.append(f"  {i}. [{vuln.severity}] {vuln.category}")
+                output_lines.append(f"     File: {vuln.file}:{vuln.line}")
+                output_lines.append(f"     {vuln.recommendation}")
+        
+        if len(report.vulnerabilities) > 10:
+            output_lines.append(f"  ... and {len(report.vulnerabilities) - 10} more vulnerabilities")
+        
+        output = "\n".join(output_lines)
+        return ToolResult(True, output, data)
+    except Exception as e:
+        return ToolResult(False, f"Security audit failed: {e}")
+
 @dataclass(frozen=True)
 class ToolDefinition:
     name: str
@@ -1040,6 +1083,20 @@ TOOL_REGISTRY: dict[str, ToolDefinition] = {
             "required": ["url"],
         },
         handler=web_scrape,
+        requires_permission=False,
+    ),
+    "security_audit": ToolDefinition(
+        name="security_audit",
+        description="Perform comprehensive security audit on a project. Detects SQL injection, XSS, path traversal, hardcoded secrets, command injection, insecure crypto, and debug mode vulnerabilities. Returns security score and detailed report. 100% offline, no data sent externally.",
+        parameters={
+            "type": "object",
+            "properties": {
+                "project_path": {"type": "string", "description": "Path to project directory to audit"},
+                "file_extensions": {"type": "array", "items": {"type": "string"}, "description": "File extensions to scan (default: .py, .js, .ts, .jsx, .tsx, .go, .rs, .php, .rb)"},
+            },
+            "required": ["project_path"],
+        },
+        handler=security_audit,
         requires_permission=False,
     ),
 }

@@ -4,17 +4,17 @@
 ██████╗ ██╗      █████╗ ███████╗███╗   ███╗ █████╗ 
 ██╔══██╗██║     ██╔══██╗██╔════╝████╗ ████║██╔══██╗
 ██████╔╝██║     ███████║███████╗██╔████╔██║███████║
-██╔═══╝ ██║     ██╔══██║╚════██║██║╚██╔╝██║██╔══██║
+██╔═══╝ ██║     ██╔══██║╚════██║██║╚██╔╝██║██╔══██╗
 ██║     ███████╗██║  ██║███████║██║ ╚═╝ ██║██║  ██║
 ╚═╝     ╚══════╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝
 ```
 
 # 🌌 **PLASMA AGENT** 🌌
 
-### *Database-Centric AI Agent with Advanced Reasoning*
+### *Database-Centric AI Agent with Security Auditing & Advanced Reasoning*
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791?logo=postgresql)](https://www.postgresql.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite)](https://www.sqlite.org/)
 [![Tests](https://img.shields.io/badge/tests-1516%20passed-brightgreen.svg)](https://github.com/luminarydearx/Plasma-Agent)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -25,17 +25,18 @@
 
 ## 🚀 **Overview**
 
-**PlasmaAgent** adalah AI Agent berbasis database yang mengimplementasikan **PostgreSQL Transactional State Machine (PTSM)** untuk orchestrasi task yang robust, fault-tolerant, dan self-improving. Dengan **Interactive Chat Mode**, PlasmaAgent dapat mengakses komputer Anda secara langsung untuk menjalankan perintah, membuat file, membuka aplikasi, dan menyimpan informasi ke long-term memory.
+**PlasmaAgent** adalah AI Agent berbasis database yang mengimplementasikan **Transactional State Machine** untuk orchestrasi task yang robust, fault-tolerant, dan self-improving. Dengan **Interactive Chat Mode** dan **Security Auditing**, PlasmaAgent dapat mengakses komputer Anda secara langsung untuk menjalankan perintah, membuat file, membuka aplikasi, menyimpan informasi ke long-term memory, dan **melakukan audit keamanan pada project Anda**.
 
 ### ✨ **Key Features**
 
 - 🧠 **Advanced Reasoning Engine** — Task decomposition, context management, error recovery
 - 🔄 **Self-Improvement Loop** — Template metrics, A/B testing, auto-optimization
 - 💡 **Smart Suggestions** — Next action recommendations, anomaly detection
-- 🔒 **Database-Centric** — All state stored in PostgreSQL with ACID transactions
+- 🔒 **Database-Centric** — All state stored in SQLite with ACID transactions (zero-configuration)
+- 🛡️ **Security Auditing** — Comprehensive vulnerability detection (SQL injection, XSS, path traversal, hardcoded secrets, command injection, insecure crypto, debug mode)
 - ⚡ **High Performance** — 1516+ tests passing, <100ms response time
 - 🛡️ **Production Ready** — Comprehensive error handling, security hardening
-- 💬 **Interactive Chat Mode** — Natural language interface dengan 13 tools (file ops, shell execution, app launcher, cron scheduler, memory)
+- 💬 **Interactive Chat Mode** — Natural language interface dengan **27 tools** (file ops, shell execution, app launcher, cron scheduler, memory, security audit)
 
 ---
 
@@ -46,6 +47,7 @@
 │                      CLI Interface                          │
 │  plasma task create | run | generate | metrics | optimize  │
 │  plasma file create | read | write | list | delete | info  │
+│  plasma monitor dashboard | metrics | top-templates        │
 │  plasma (interactive chat mode)                             │
 └──────────────────────┬──────────────────────────────────────┘
                        │
@@ -74,7 +76,7 @@
 └──────────────────────┬──────────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
-│         PostgreSQL + pgvector (PTSM State Machine)         │
+│         SQLite + SQLAlchemy (State Machine)                │
 │  tasks | task_steps | execution_logs | template_metrics    │
 │  memories | conversation_sessions | task_patterns          │
 └─────────────────────────────────────────────────────────────┘
@@ -94,13 +96,7 @@ cd Plasma-Agent
 # Install dependencies
 uv sync
 
-# Setup database
-createdb -U postgres plasmaagent
-
-# Run migrations
-uv run alembic upgrade head
-
-# Verify installation
+# Verify installation (database auto-created)
 uv run plasma doctor
 
 # Install globally (optional)
@@ -110,15 +106,16 @@ uv tool install .
 ### **Requirements**
 
 - Python 3.13+
-- PostgreSQL 15+
 - uv (Python package manager)
 - Ollama (for chat mode)
+
+**Note:** No PostgreSQL required! Database is automatically created as SQLite file at `~/.plasmaagent/plasma.db`
 
 ---
 
 ## 🎬 **Usage**
 
-### **0️⃣ Interactive Chat Mode (NEW!)**
+### **0️⃣ Interactive Chat Mode**
 
 ```bash
 # Start interactive chat with AI agent
@@ -132,11 +129,11 @@ plasma --model qwen2.5-coder:7b-instruct-q4_K_M
 - `exit` / `quit` — Leave chat
 - `/clear` — Clear screen & reset chat
 - `/reset` — Clear history only
-- `/tools` — List all 13 available tools
+- `/tools` — List all 27 available tools
 - `/model` — List available models (with context length)
 - `/model <name>` — Switch to different model
 
-**Agent Capabilities (13 Tools):**
+**Agent Capabilities (27 Tools):**
 
 1. **File Operations:**
    - `create_file` — Create new file with content
@@ -145,17 +142,37 @@ plasma --model qwen2.5-coder:7b-instruct-q4_K_M
    - `list_directory` — List files & folders
    - `delete_file` — Delete file or directory
    - `file_info` — Get file metadata
+   - `find_file` — Search for files by pattern
 
 2. **System:**
    - `execute_shell` — Run PowerShell/bash commands (full output displayed)
    - `open_app` — Open applications or URLs (e.g., "buka edge dan cari youtube")
    - `cron_schedule` — Schedule recurring tasks with cron expressions
+   - `schedule_once` — Schedule one-time tasks
    - `system_info` — Get system information
+   - `system_stats` — Get CPU, memory, disk usage
    - `current_time` — Get current date/time
+   - `screenshot` — Capture screen
+   - `process_list` — List running processes
+   - `kill_process` — Terminate processes
+   - `send_notification` — Show desktop notifications
 
 3. **Memory:**
    - `store_memory` — Save information to long-term memory
    - `search_memory` — Search stored memories
+
+4. **Web:**
+   - `web_search` — Search the web (DuckDuckGo)
+   - `web_scrape` — Scrape web page content
+   - `youtube_search` — Search YouTube videos
+   - `download_file` — Download files from URL
+
+5. **Clipboard:**
+   - `clipboard_get` — Get clipboard content
+   - `clipboard_set` — Set clipboard content
+
+6. **Security (NEW!):**
+   - `security_audit` — Comprehensive security audit with vulnerability detection
 
 **Examples:**
 ```
@@ -164,13 +181,43 @@ plasma --model qwen2.5-coder:7b-instruct-q4_K_M
 > Buka edge dan cari youtube windah basudara
 > Schedule backup database setiap jam 2 pagi
 > Ingat bahwa saya suka coding Python
+> Lakukan security audit pada project C:\Projects\myapp
 ```
 
-### **1️⃣ Create Task (Manual)**
+### **1️⃣ Security Audit (NEW!)**
+
+```bash
+# Via chat mode
+plasma
+> Lakukan security audit pada project C:\Projects\myapp
+
+# Programmatic usage
+from plasmaagent.security.audit_tool import SecurityAuditor
+import asyncio
+
+async def audit():
+    auditor = SecurityAuditor()
+    report = await auditor.audit_project("C:\\Projects\\myapp")
+    print(f"Security Score: {report.score}/100")
+    print(f"Vulnerabilities: {len(report.vulnerabilities)}")
+
+asyncio.run(audit())
+```
+
+**Detects:**
+- 🔴 **SQL Injection** — String formatting in SQL queries
+- 🔴 **Command Injection** — Unsafe shell command execution
+- 🔴 **Hardcoded Secrets** — Passwords, API keys, tokens in code
+- 🟠 **Path Traversal** — Unsafe file path handling
+- 🟠 **XSS** — Unsafe HTML/DOM manipulation
+- 🟡 **Insecure Crypto** — MD5, SHA1, DES, RC4 usage
+- 🟡 **Debug Mode** — DEBUG=True, print statements in production
+
+### **2️⃣ Create Task (Manual)**
 
 ```bash
 # Simple task
-plasma task create --name "Backup DB" --command "pg_dump plasmaagent > backup.sql"
+plasma task create --name "Backup DB" --command "sqlite3 plasma.db .dump > backup.sql"
 
 # Multi-step task
 plasma task create --name "Deploy" \
@@ -180,17 +227,17 @@ plasma task create --name "Deploy" \
   --command "npm run deploy"
 ```
 
-### **2️⃣ Generate Task (AI-Powered)**
+### **3️⃣ Generate Task (AI-Powered)**
 
 ```bash
 # Natural language → structured task
-plasma task generate --input "backup database postgresql plasmaagent" --yes
+plasma task generate --input "backup sqlite database plasmaagent" --yes
 
 # Preview before create
 plasma task generate --input "check disk space" --preview
 ```
 
-### **3️⃣ Execute Task**
+### **4️⃣ Execute Task**
 
 ```bash
 # Run task
@@ -203,7 +250,7 @@ plasma task show --id <task-id> --logs
 plasma task show --id <task-id> --steps
 ```
 
-### **4️⃣ File Operations (CLI)**
+### **5️⃣ File Operations (CLI)**
 
 ```bash
 # Create file
@@ -222,7 +269,7 @@ plasma file execute "Get-Process | Select-Object -First 5" --force
 plasma file delete "C:\Users\You\Documents\test.txt" --force
 ```
 
-### **5️⃣ Metrics & Optimization**
+### **6️⃣ Metrics & Monitoring**
 
 ```bash
 # View template metrics
@@ -233,6 +280,18 @@ plasma metrics analyze
 
 # Auto-optimize confidence scores
 plasma metrics optimize --dry-run
+
+# Monitor dashboard (interactive)
+plasma monitor dashboard
+
+# View execution metrics
+plasma monitor metrics
+
+# Top templates
+plasma monitor top-templates
+
+# Failure patterns
+plasma monitor failures
 ```
 
 ---
@@ -258,8 +317,8 @@ uv run pytest --cov=src/plasmaagent
 ## 📚 **Project Phases**
 
 ### **Phase 1: Foundation** ✅
-- Database schema with pgvector
-- PTSM state machine
+- Database schema with SQLAlchemy
+- Transactional state machine
 - CLI foundation
 - Configuration management
 
@@ -284,11 +343,11 @@ uv run pytest --cov=src/plasmaagent
 - **4.4**: Reliability engineering (circuit breakers, graceful degradation)
 
 ### **Phase 5: Intelligence Expansion** 🚧
-- **5.1**: Memory system (short-term, long-term, pgvector) ✅
-- **5.2**: RAG (document ingestion, semantic search) 📋
+- **5.1**: Memory system (short-term, long-term, vector search) ✅
+- **5.2**: RAG (document ingestion, semantic search) 🚧
 - **5.3**: Multi-agent coordination 📋
-- **5.4**: Tool use & skills 📋
-- **5.5**: Security enhancement (permission system, audit logging) 🚧
+- **5.4**: Tool use & skills ✅
+- **5.5**: Security enhancement (permission system, audit logging, security auditing) ✅
 
 ### **Phase 6: Ecosystem** 📋
 - **6.1**: API gateway (REST, WebSocket)
@@ -304,8 +363,8 @@ uv run pytest --cov=src/plasmaagent
 ### **Environment Variables**
 
 ```bash
-# Database
-DATABASE_URL=postgresql+psycopg://postgres:password@localhost/plasmaagent
+# Database (auto-configured, no manual setup needed)
+DATABASE_URL=sqlite+aiosqlite:///~/.plasmaagent/plasma.db
 
 # Execution
 EXECUTION_TIMEOUT=3600
@@ -324,7 +383,6 @@ OLLAMA_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
 Create `.env` in project root:
 
 ```env
-DATABASE_URL=postgresql+psycopg://postgres:password@localhost/plasmaagent
 LOG_LEVEL=INFO
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
@@ -336,9 +394,9 @@ OLLAMA_MODEL=qwen2.5-coder:7b-instruct-q4_K_M
 
 - **[ROADMAP.md](ROADMAP.md)** — Project roadmap & milestones
 - **[FASE.md](FASE.md)** — Current development status & handoff protocol
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — System architecture
 - **[SYSTEM_PROMPT.md](SYSTEM_PROMPT.md)** — Ultra-complex system prompt (14.3 KB)
 - **[docs/PLASMA_THEME.md](docs/PLASMA_THEME.md)** — CLI theme customization
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — System architecture (coming soon)
 
 ---
 
@@ -377,8 +435,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 **Acknowledgments**
 
 - Built with [Typer](https://typer.tiangolo.com/) for CLI
-- Powered by [PostgreSQL](https://www.postgresql.org/) + [pgvector](https://github.com/pgvector/pgvector)
-- Async database operations with [psycopg3](https://www.psycopg.org/psycopg3/)
+- Powered by [SQLite](https://www.sqlite.org/) + [SQLAlchemy](https://www.sqlalchemy.org/)
+- Async database operations with [aiosqlite](https://github.com/omnilib/aiosqlite)
 - Rich terminal output with [Rich](https://rich.readthedocs.io/)
 - AI agent powered by [Ollama](https://ollama.ai/)
 

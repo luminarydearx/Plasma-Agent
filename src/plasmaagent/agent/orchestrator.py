@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -157,7 +157,7 @@ TWO TYPES OF SCHEDULING:
    REQUIRED: ISO datetime "YYYY-MM-DDTHH:MM:SS"
 
    Examples:
-   - "jam 21:18 hari ini" → calculate TODAY's date + 21:18 → "{{"name": "schedule_once", "arguments": {{"task_name": "...", "run_at": "2026-06-05T21:18:00", "commands": [...]}}}}"
+   - "jam 21:18 hari ini" → calculate TODAY's date + 21:18 → '{{"name": "schedule_once", "arguments": {{"task_name": "...", "run_at": "2026-06-05T21:18:00", "commands": [...]}}}}'
    - "besok jam 9 pagi" → tomorrow + 09:00 → "2026-06-06T09:00:00"
    - "10 menit lagi" → current + 10min → ISO format
 
@@ -247,6 +247,8 @@ class AgentOrchestrator:
         ollama: OllamaClient | None = None,
         system_prompt: str = "",
         max_tool_iterations: int = 5,
+        on_permission_needed: Callable[[], None] | None = None,
+        on_permission_done: Callable[[], None] | None = None,
     ):
         self._ollama = ollama or OllamaClient()
         self._system_prompt = system_prompt or _build_system_prompt()
@@ -254,6 +256,8 @@ class AgentOrchestrator:
         self._history: list[dict[str, Any]] = []
         self._tools = TOOL_REGISTRY
         self._permission_manager = None
+        self._on_permission_needed = on_permission_needed
+        self._on_permission_done = on_permission_done
 
     def reset_history(self) -> None:
         self._history.clear()
@@ -328,7 +332,12 @@ class AgentOrchestrator:
                     result = ToolResult(False, f"Unknown tool: {name}. Available: {list(TOOL_REGISTRY.keys())}")
                 else:
                     if tool_def.requires_permission:
+                        if self._on_permission_needed:
+                            self._on_permission_needed()
                         perm_result = await request_tool_permission(name, args)
+                        if self._on_permission_done:
+                            self._on_permission_done()
+                        
                         if not perm_result.allowed:
                             result = ToolResult(False, f"Permission denied: {perm_result.reason}")
                             tool_calls_made.append({"name": name, "args": args, "id": call_id})
