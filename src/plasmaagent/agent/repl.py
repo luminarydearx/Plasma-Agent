@@ -297,6 +297,14 @@ def start_chat(model: str = "qwen2.5-coder:7b-instruct", base_url: str = "http:/
     from plasmaagent.agent.ollama_client import AgentOrchestrator, OllamaClient
 
     async def main():
+        from plasmaagent.core.database import get_database
+        from plasmaagent.core.schema import init_schema
+        
+        db = get_database()
+        await db.connect()
+        async with db.connection() as conn:
+            await init_schema(conn)
+        
         ollama = OllamaClient(model=model, base_url=base_url)
 
         saved_model = get_default_model()

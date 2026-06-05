@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,15 +14,16 @@ class Settings(BaseSettings):
     )
 
     app_name: str = Field(default="PlasmaAgent")
-    app_version: str = Field(default="0.1.0")
+    app_version: str = Field(default="0.2.0")
     debug: bool = Field(default=False)
 
-    database_url: str = Field(
-        default="postgresql+psycopg://postgres:090208@localhost:5432/plasmaagent"
+    database_path: str = Field(
+        default=str(Path.home() / ".plasmaagent" / "plasma.db")
     )
-    database_pool_size: int = Field(default=10)
-    database_max_overflow: int = Field(default=20)
-    database_pool_timeout: int = Field(default=30)
+    vector_store_path: str = Field(
+        default=str(Path.home() / ".plasmaagent" / "vectors")
+    )
+    embedding_model: str = Field(default="all-MiniLM-L6-v2")
 
     log_level: str = Field(default="INFO")
     log_format: str = Field(default="json")

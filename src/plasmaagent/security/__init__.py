@@ -19,6 +19,11 @@ from plasmaagent.security.audit_service import (
     AuditAction,
 )
 from plasmaagent.security.permission_service import PermissionService
+from plasmaagent.security.sanitizer import (
+    InputSanitizer,
+    SanitizationResult,
+    get_sanitizer,
+)
 
 __all__ = [
     "User",
@@ -36,4 +41,7 @@ __all__ = [
     "AuditLogQuery",
     "AuditAction",
     "PermissionService",
+    "InputSanitizer",
+    "SanitizationResult",
+    "get_sanitizer",
 ]

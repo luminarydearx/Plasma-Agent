@@ -1,9 +1,11 @@
-from uuid import UUID, uuid4
 from datetime import datetime, timezone
-import json
-import psycopg
-from psycopg.types.json import Jsonb
-from plasmaagent.memory.models import Memory, MemoryType, MemoryStats
+from typing import Optional
+from uuid import UUID, uuid4
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from plasmaagent.memory.models import Memory, MemoryStats, MemoryType
 
 
 class MemoryNotFoundError(Exception):
@@ -13,7 +15,7 @@ class MemoryNotFoundError(Exception):
 
 
 class MemoryService:
-    def __init__(self, conn: psycopg.AsyncConnection):
+    def __init__(self, conn: AsyncConnection):
         self._conn = conn
 
     async def store_memory(
@@ -22,19 +24,33 @@ class MemoryService:
         memory_type: MemoryType,
         user_id: UUID | None = None,
         metadata: dict | None = None,
-        embedding: list[float] | None = None
+        embedding: list[float] | None = None,
     ) -> Memory:
+        import json
+
         memory_id = uuid4()
         now = datetime.now(timezone.utc)
         metadata = metadata or {}
         embedding_str = json.dumps(embedding) if embedding else None
+        metadata_str = json.dumps(metadata)
 
         await self._conn.execute(
-            """
-            INSERT INTO memories (id, user_id, content, embedding, metadata, memory_type, created_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """,
-            (memory_id, user_id, content, embedding_str, Jsonb(metadata), memory_type.value, now, now)
+            text(
+                """
+                INSERT INTO memories (id, user_id, content, embedding, metadata, memory_type, created_at, updated_at)
+                VALUES (:id, :user_id, :content, :embedding, :metadata, :memory_type, :created_at, :updated_at)
+                """
+            ),
+            {
+                "id": str(memory_id),
+                "user_id": str(user_id) if user_id else None,
+                "content": content,
+                "embedding": embedding_str,
+                "metadata": metadata_str,
+                "memory_type": memory_type.value,
+                "created_at": now,
+                "updated_at": now,
+            },
         )
 
         return Memory(
@@ -45,132 +61,142 @@ class MemoryService:
             metadata=metadata,
             memory_type=memory_type,
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
 
     async def get_memory(self, memory_id: UUID) -> Memory:
-        async with self._conn.cursor() as cur:
-            await cur.execute(
-                "SELECT * FROM memories WHERE id = %s",
-                (memory_id,)
-            )
-            row = await cur.fetchone()
+        result = await self._conn.execute(
+            text("SELECT * FROM memories WHERE id = :id"),
+            {"id": str(memory_id)},
+        )
+        row = result.fetchone()
 
         if not row:
             raise MemoryNotFoundError(memory_id)
 
-        return self._row_to_memory(row)
+        return self._row_to_memory(row._mapping)
 
     async def delete_memory(self, memory_id: UUID) -> None:
-        async with self._conn.cursor() as cur:
-            await cur.execute(
-                "DELETE FROM memories WHERE id = %s",
-                (memory_id,)
-            )
+        result = await self._conn.execute(
+            text("DELETE FROM memories WHERE id = :id"),
+            {"id": str(memory_id)},
+        )
 
-            if cur.rowcount == 0:
-                raise MemoryNotFoundError(memory_id)
+        if result.rowcount == 0:
+            raise MemoryNotFoundError(memory_id)
 
     async def search_memories(
         self,
         query: str,
         limit: int = 10,
         memory_type: MemoryType | None = None,
-        user_id: UUID | None = None
+        user_id: UUID | None = None,
     ) -> list[Memory]:
         if limit < 1 or limit > 1000:
             raise ValueError("limit must be between 1 and 1000")
         if not query or len(query) > 1000:
             raise ValueError("query must be 1-1000 characters")
 
-        conditions = ["content ILIKE %s"]
-        params: list = [f"%{query}%"]
+        conditions = ["content LIKE :query"]
+        params: dict = {"query": f"%{query}%", "limit": limit}
 
         if memory_type:
-            conditions.append("memory_type = %s")
-            params.append(memory_type.value)
+            conditions.append("memory_type = :memory_type")
+            params["memory_type"] = memory_type.value
 
         if user_id:
-            conditions.append("user_id = %s")
-            params.append(user_id)
+            conditions.append("user_id = :user_id")
+            params["user_id"] = str(user_id)
 
         where_clause = " AND ".join(conditions)
-        params.append(limit)
 
-        async with self._conn.cursor() as cur:
-            await cur.execute(
+        result = await self._conn.execute(
+            text(
                 f"""
                 SELECT * FROM memories
                 WHERE {where_clause}
                 ORDER BY created_at DESC
-                LIMIT %s
-                """,
-                params
-            )
-            rows = await cur.fetchall()
+                LIMIT :limit
+                """
+            ),
+            params,
+        )
+        rows = result.fetchall()
 
-        return [self._row_to_memory(row) for row in rows]
+        return [self._row_to_memory(row._mapping) for row in rows]
 
     async def get_memories_by_type(
         self,
         memory_type: MemoryType,
         limit: int = 100,
-        user_id: UUID | None = None
+        user_id: UUID | None = None,
     ) -> list[Memory]:
         if limit < 1 or limit > 1000:
             raise ValueError("limit must be between 1 and 1000")
 
-        async with self._conn.cursor() as cur:
-            if user_id:
-                await cur.execute(
+        if user_id:
+            result = await self._conn.execute(
+                text(
                     """
                     SELECT * FROM memories
-                    WHERE memory_type = %s AND user_id = %s
+                    WHERE memory_type = :memory_type AND user_id = :user_id
                     ORDER BY created_at DESC
-                    LIMIT %s
-                    """,
-                    (memory_type.value, user_id, limit)
-                )
-            else:
-                await cur.execute(
+                    LIMIT :limit
+                    """
+                ),
+                {"memory_type": memory_type.value, "user_id": str(user_id), "limit": limit},
+            )
+        else:
+            result = await self._conn.execute(
+                text(
                     """
                     SELECT * FROM memories
-                    WHERE memory_type = %s
+                    WHERE memory_type = :memory_type
                     ORDER BY created_at DESC
-                    LIMIT %s
-                    """,
-                    (memory_type.value, limit)
-                )
-            rows = await cur.fetchall()
+                    LIMIT :limit
+                    """
+                ),
+                {"memory_type": memory_type.value, "limit": limit},
+            )
+        rows = result.fetchall()
 
-        return [self._row_to_memory(row) for row in rows]
+        return [self._row_to_memory(row._mapping) for row in rows]
 
     async def get_stats(self) -> MemoryStats:
-        async with self._conn.cursor() as cur:
-            await cur.execute("SELECT COUNT(*) as cnt FROM memories")
-            total = (await cur.fetchone())["cnt"]
+        result = await self._conn.execute(text("SELECT COUNT(*) as cnt FROM memories"))
+        total = result.fetchone()._mapping["cnt"]
 
-            await cur.execute(
-                "SELECT memory_type, COUNT(*) as cnt FROM memories GROUP BY memory_type"
+        result = await self._conn.execute(
+            text("SELECT memory_type, COUNT(*) as cnt FROM memories GROUP BY memory_type")
+        )
+        type_counts = result.fetchall()
+        memories_by_type = {row._mapping["memory_type"]: row._mapping["cnt"] for row in type_counts}
+
+        try:
+            result = await self._conn.execute(
+                text("SELECT COUNT(*) as cnt FROM conversation_sessions")
             )
-            type_counts = await cur.fetchall()
-            memories_by_type = {row["memory_type"]: row["cnt"] for row in type_counts}
+            total_conversations = result.fetchone()._mapping["cnt"]
+        except Exception:
+            total_conversations = 0
 
-            await cur.execute("SELECT COUNT(*) as cnt FROM conversation_sessions")
-            total_conversations = (await cur.fetchone())["cnt"]
-
-            await cur.execute("SELECT COUNT(*) as cnt FROM task_patterns")
-            total_patterns = (await cur.fetchone())["cnt"]
+        try:
+            result = await self._conn.execute(text("SELECT COUNT(*) as cnt FROM task_patterns"))
+            total_patterns = result.fetchone()._mapping["cnt"]
+        except Exception:
+            total_patterns = 0
 
         return MemoryStats(
             total_memories=total or 0,
             memories_by_type=memories_by_type,
             total_conversations=total_conversations or 0,
             total_patterns=total_patterns or 0,
-            avg_embedding_dimensions=384
+            avg_embedding_dimensions=384,
         )
 
     def _row_to_memory(self, row: dict) -> Memory:
+        import json
+
         embedding = None
         if row.get("embedding"):
             raw = row["embedding"]
@@ -190,12 +216,12 @@ class MemoryService:
                 metadata = {}
 
         return Memory(
-            id=row["id"],
-            user_id=row.get("user_id"),
+            id=UUID(str(row["id"])) if isinstance(row["id"], str) else row["id"],
+            user_id=UUID(str(row["user_id"])) if row.get("user_id") and isinstance(row["user_id"], str) else row.get("user_id"),
             content=row["content"],
             embedding=embedding,
             metadata=metadata,
             memory_type=MemoryType(row["memory_type"]),
             created_at=row["created_at"],
-            updated_at=row["updated_at"]
+            updated_at=row["updated_at"],
         )
